@@ -2457,6 +2457,7 @@ namespace NKikimr {
         }
 
         void RunBalancing(const TActorContext &ctx) {
+            return;
             if (!Config->FeatureFlags.GetUseVDisksBalancing()) {
                 return;
             }
