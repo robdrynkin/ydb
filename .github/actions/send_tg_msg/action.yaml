@@ -1,0 +1,14 @@
+name: Send tg message
+description: Send tg message
+inputs:
+  text:
+    required: false
+    type: string
+  chat_id:
+    required: false
+    type: string
+
+runs:
+  steps:
+  - name: Send
+    run: echo "${{ inputs.text }}" | curl -s -F chat_id='{{ inputs.chat_id }}' -F text='<-' "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/SendMessage"

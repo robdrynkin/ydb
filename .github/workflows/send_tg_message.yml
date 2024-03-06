@@ -1,0 +1,16 @@
+name: Send tg message
+on:
+  workflow_dispatch:
+jobs:
+  notify_tg_if_error:
+    name: Send alarm to tg
+    runs-on: [ self-hosted, linux ]
+    steps:
+    - name: Checkout
+      uses: actions/checkout@master
+    - name: Send msg
+      uses: ./.github/actions/send_tg_msg
+      secrets: inherit
+      with:
+        text: "asddfgf qwer"
+        chat_id: "92022608"

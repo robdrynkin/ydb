@@ -91,4 +91,7 @@ jobs:
         testman_project_id: ${{vars.TESTMO_PROJECT_ID}}
         run_unit_tests: ${{inputs.run_unit_tests}}
         run_functional_tests: ${{inputs.run_functional_tests}}
+    - name: Send alarm to tg
+      if: ${{ failure() }}
+      run: echo "Build failed" | curl -s -F chat_id='92022608' -F text='<-' "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/SendMessage"
 
