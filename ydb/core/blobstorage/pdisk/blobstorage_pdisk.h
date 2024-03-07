@@ -1,7 +1,7 @@
 #pragma once
 #include "defs.h"
 
-#include "blobstorage_pdisk_defs.h"
+#include "blobstorage_pdisk_def.h"
 #include "blobstorage_pdisk_params.h"
 #include "blobstorage_pdisk_config.h"
 
