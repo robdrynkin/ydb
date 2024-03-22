@@ -74,6 +74,10 @@ namespace NKikimr {
         std::atomic<ui32> CurrentOOSStatusFlag = NKikimrBlobStorage::StatusIsValid;
         std::shared_ptr<NMonGroup::TOutOfSpaceGroup> OOSMonGroup;
 
+        // oos logging
+        std::atomic<ui32> CurrentOOSStatusFlag = NKikimrBlobStorage::StatusIsValid;
+        std::shared_ptr<NMonGroup::TOutOfSpaceGroup> OOSMonGroup;
+
     private:
         // Managing disk space
         TOutOfSpaceState OutOfSpaceState;
