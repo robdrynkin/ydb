@@ -110,6 +110,19 @@ namespace NBalancing {
                 // collect parts to send on main
                 for (const auto& [parts, data]: merger.Parts) {
                     if (!(partsToSend & parts).Empty()) {
+
+                        const size_t headerSize = sizeof(ui32) + sizeof(ui8);
+                        ui32 blobSize = 0;
+                        for (ui8 i = parts.FirstPosition(); i != parts.GetSize(); i = parts.NextPosition(i)) {
+                            blobSize += top.GType.PartSize(TLogoBlobID(It.GetCurKey().LogoBlobID(), i + 1));
+                        }
+                        if (std::holds_alternative<TRope>(data)) {
+                            Y_DEBUG_ABORT_UNLESS(blobSize == std::get<TRope>(data).GetSize() || blobSize + headerSize == std::get<TRope>(data).GetSize());
+                        } else {
+                            const auto& part = std::get<TDiskPart>(data);
+                            Y_DEBUG_ABORT_UNLESS(blobSize == part.Size || blobSize + headerSize == part.Size);
+                        }
+
                         SendOnMainParts.push(TPartInfo{
                             .Key=It.GetCurKey().LogoBlobID(),
                             .PartsMask=parts,

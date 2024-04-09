@@ -95,6 +95,7 @@ namespace NKikimr {
         const TActorId SkeletonId;
 
         TDeque<ui8> DelMap;
+        TDeque<TLogoBlobID> DelKeys;
         unsigned Counter;
         TTransformedItem TrRes;
         TStat Stat;
@@ -177,6 +178,7 @@ namespace NKikimr {
         }
 
         Y_VERIFY(Counter < DelMap.size());
+        Y_DEBUG_ABORT_UNLESS(DelKeys.at(Counter) == key.LogoBlobID());
         TIngress ingress = memRec->GetIngress(); // ingress we are going to change
         NMatrix::TVectorType localParts = ingress.LocalParts(Top->GType);
         ui8 vecSize = Top->GType.TotalPartCount();
@@ -269,6 +271,7 @@ namespace NKikimr {
                 TIngress globalIngress = dbMerger.GetMemRec().GetIngress();
                 auto del = globalIngress.GetVDiskHandoffDeletedVec(Top.get(), HullCtx->VCtx->ShortSelfVDisk, id) & globalIngress.LocalParts(Top->GType);
                 DelMap.push_back(del.Raw());
+                DelKeys.push_back(dbIt.GetCurKey().LogoBlobID());
 
                 // update stat
                 bool delEmpty = del.Empty();

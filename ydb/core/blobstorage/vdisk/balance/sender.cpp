@@ -6,6 +6,8 @@
 
 #include <ydb/core/util/stlog.h>
 
+#include <random>
+
 
 namespace NKikimr {
 namespace NBalancing {
@@ -14,6 +16,7 @@ namespace {
         TLogoBlobID Key;
         NMatrix::TVectorType PartsMask;
         TVector<TRope> PartsData;
+        TPartInfo OrigPart;
     };
 
     class TReader {
@@ -24,9 +27,17 @@ namespace {
         TReplQuoter::TPtr Quoter;
         const TBlobStorageGroupType GType;
 
-        TVector<TPart> Result;
-        ui32 Responses;
-        ui32 ExpectedResponses;
+        // TVector<TPart> Result;
+        ui32 BatchId = 0;
+        ui32 Responses = 0;
+        ui32 ExpectedResponses = 0;
+
+        THashMap<ui64, TPart> ResultMap;
+        std::mt19937_64 Gen64;
+
+        TVector<std::tuple<ui64, TLogoBlobID, TDiskPart>> ExpectedParts;
+        TVector<std::tuple<ui64, TLogoBlobID, TDiskPart, NKikimrProto::EReplyStatus>> ReceivedParts;
+
     public:
 
         TReader(size_t batchSize, TPDiskCtxPtr pDiskCtx, TQueue<TPartInfo> parts, TReplQuoter::TPtr replPDiskReadQuoter, TBlobStorageGroupType gType)
@@ -35,26 +46,44 @@ namespace {
             , Parts(std::move(parts))
             , Quoter(replPDiskReadQuoter)
             , GType(gType)
-            , Result(Reserve(BatchSize))
-            , Responses(0)
-            , ExpectedResponses(0)
+            // , Result(Reserve(BatchSize))
+            , Gen64(TlsActivationContext->Now().MilliSeconds())
         {}
 
+        ui64 MakeCookie(ui32 itemIndex) {
+            return BatchId * BatchSize + itemIndex;
+        }
+
+        std::pair<ui32, ui32> ParseCookie(ui64 cookie) {
+            return {cookie / BatchSize, cookie % BatchSize};
+        }
+
         void ScheduleJobQuant(const TActorId& selfId) {
-            Result.resize(Min(Parts.size(), BatchSize));
+            // Result.resize(Min(Parts.size(), BatchSize));
+            ResultMap.clear();
             ExpectedResponses = 0;
             for (ui64 i = 0; i < BatchSize && !Parts.empty(); ++i) {
                 auto item = Parts.front();
                 Parts.pop();
-                Result[i] = TPart{
+                // Result[i] = TPart{
+                //     .Key=item.Key,
+                //     .PartsMask=item.PartsMask,
+                //     .OrigPart=item
+                // };
+
+                ui64 key = Gen64();
+                ResultMap[key] = TPart{
                     .Key=item.Key,
                     .PartsMask=item.PartsMask,
+                    .OrigPart=item
                 };
+
                 std::visit(TOverloaded{
                     [&](const TRope& data) {
                         // part is already in memory, no need to read it from disk
                         Y_DEBUG_ABORT_UNLESS(item.PartsMask.CountBits() == 1);
-                        Result[i].PartsData = {data};
+                        ResultMap[key].PartsData = {data};
+                        // Result[i].PartsData = {data};
                         ++Responses;
                     },
                     [&](const TDiskPart& diskPart) {
@@ -65,7 +94,8 @@ namespace {
                             diskPart.Offset,
                             diskPart.Size,
                             NPriRead::HullLow,
-                            reinterpret_cast<void*>(i)
+                            // reinterpret_cast<void*>(MakeCookie(i))
+                            reinterpret_cast<void*>(key)
                         );
 
                         TReplQuoter::QuoteMessage(
@@ -73,6 +103,8 @@ namespace {
                             std::make_unique<IEventHandle>(PDiskCtx->PDiskId, selfId, ev.release()),
                             diskPart.Size
                         );
+
+                        ExpectedParts.emplace_back(key, item.Key, diskPart);
                     }
                 }, item.PartData);
                 ++ExpectedResponses;
@@ -81,29 +113,64 @@ namespace {
 
         std::pair<std::optional<TVector<TPart>>, ui32> TryGetResults() {
             if (ExpectedResponses == Responses) {
+                if (Responses != 0) {
+                    ++BatchId;
+                }
                 ExpectedResponses = 0;
                 Responses = 0;
-                return {std::move(Result), Parts.size()};
+
+                TVector<TPart> result;
+                result.reserve(ResultMap.size());
+                for (auto& [_, part]: ResultMap) {
+                    result.push_back(std::move(part));
+                }
+                return {std::move(result), Parts.size()};
             }
             return {std::nullopt, Parts.size()};
         }
 
-        void Handle(NPDisk::TEvChunkReadResult::TPtr ev) {
+        void Handle(NPDisk::TEvChunkReadResult::TPtr ev, const TString& vDiskLogPrefix) {
             ++Responses;
             auto *msg = ev->Get();
+            ui64 cookie = reinterpret_cast<ui64>(msg->Cookie);
+            Y_DEBUG_ABORT_UNLESS(ResultMap.contains(cookie));
+            auto& res = ResultMap[cookie];
+            ReceivedParts.emplace_back(cookie, res.Key, TDiskPart{msg->ChunkIdx, msg->Offset, static_cast<ui32>(msg->Data.ToString().GetSize())}, msg->Status);
+
             if (msg->Status != NKikimrProto::EReplyStatus::OK) {
+                STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB15, VDISKP(vDiskLogPrefix, "TEvChunkRead failed"), (Status, msg->Status));
                 return;
             }
-            ui64 i = reinterpret_cast<ui64>(msg->Cookie);
-            const auto& key = Result[i].Key;
+            // const auto& [batchId, i] = ParseCookie(reinterpret_cast<ui64>(msg->Cookie));
+            // if (batchId != BatchId) {
+            //     STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB16, VDISKP(vDiskLogPrefix, "Got response for old batch"), (BatchId, BatchId), (i, i));
+            //     return;
+            // }
+            if (!msg->Data.IsReadable(0, std::get<TDiskPart>(res.OrigPart.PartData).Size)) {
+                STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB16, VDISKP(vDiskLogPrefix, "Got response with wrong size"), (ExpectedSize, std::get<TDiskPart>(res.OrigPart.PartData).Size), (Key, res.Key.ToString()));
+                return;
+            }
+            const auto& key = res.Key;
             auto data = TRope(msg->Data.ToString());
-            auto localParts = Result[i].PartsMask;
+            auto localParts = res.PartsMask;
+
+            {
+                auto part = res.OrigPart.PartData;
+
+                if (std::holds_alternative<TRope>(part)) {
+                    Y_DEBUG_ABORT_UNLESS(data.size() == std::get<TRope>(part).GetSize());
+                } else {
+                    const auto& diskPart = std::get<TDiskPart>(part);
+                    Y_DEBUG_ABORT_UNLESS(data.size() == diskPart.Size);
+                }
+            }
+
             auto diskBlob = TDiskBlob(&data, localParts, GType, key);
 
             for (ui8 partIdx = localParts.FirstPosition(); partIdx < localParts.GetSize(); partIdx = localParts.NextPosition(partIdx)) {
                 TRope result;
                 result = diskBlob.GetPart(partIdx, &result);
-                Result[i].PartsData.emplace_back(std::move(result));
+                res.PartsData.emplace_back(std::move(result));
             }
         }
     };
@@ -145,7 +212,7 @@ namespace {
         }
 
         void Handle(NPDisk::TEvChunkReadResult::TPtr ev) {
-            Reader.Handle(ev);
+            Reader.Handle(ev, Ctx->VCtx->VDiskLogPrefix);
             TryProcessResults();
         }
 
@@ -154,11 +221,16 @@ namespace {
 
             for (const auto& part: batch) {
                 auto localParts = part.PartsMask;
+                if (part.PartsData.empty()) {
+                    STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB12, VDISKP(Ctx->VCtx, "No parts data, probably TEvChunkRead failed"), (Key, part.Key.ToString()));
+                    continue;
+                }
+                Y_DEBUG_ABORT_UNLESS(localParts.CountBits() == part.PartsData.size());
                 for (ui8 partIdx = localParts.FirstPosition(), i = 0; partIdx < localParts.GetSize(); partIdx = localParts.NextPosition(partIdx), ++i) {
                     auto key = TLogoBlobID(part.Key, partIdx + 1);
                     const auto& data = part.PartsData[i];
                     auto vDiskId = GetMainReplicaVDiskId(*GInfo, key);
-                    STLOG(PRI_DEBUG, BS_VDISK_BALANCING, BSVB12, VDISKP(Ctx->VCtx, "Sending"), (LogoBlobId, key.ToString()),
+                    STLOG(PRI_DEBUG, BS_VDISK_BALANCING, BSVB17, VDISKP(Ctx->VCtx, "Sending"), (LogoBlobId, key.ToString()),
                         (To, GInfo->GetTopology().GetOrderNumber(TVDiskIdShort(vDiskId))), (DataSize, data.size()));
 
                     auto& queue = (*QueueActorMapPtr)[TVDiskIdShort(vDiskId)];
@@ -180,7 +252,7 @@ namespace {
             ++Stats.PartsSent;
             if (ev->Get()->Record.GetStatus() != NKikimrProto::OK) {
                 ++Stats.PartsSentUnsuccsesfull;
-                STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB13, VDISKP(Ctx->VCtx, "Put failed"), (Msg, ev->Get()->ToString()));
+                STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB18, VDISKP(Ctx->VCtx, "Put failed"), (Msg, ev->Get()->ToString()));
                 return;
             }
             ++Ctx->MonGroup.SentOnMain();

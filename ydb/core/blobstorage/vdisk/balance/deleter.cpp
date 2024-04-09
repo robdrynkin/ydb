@@ -26,27 +26,49 @@ namespace {
         TReplQuoter::TPtr Quoter;
         TIntrusivePtr<TBlobStorageGroupInfo> GInfo;
         TQueueActorMapPtr QueueActorMapPtr;
+        TDuration BatchTimeout;
+        TInstant CurBatchStart;
+        ui32 BatchId = 0;
 
         TVector<TPartOnMain> Result;
-        ui32 Responses;
-        ui32 ExpectedResponses;
+        ui32 Responses = 0;
+        ui32 ExpectedResponses = 0;
     public:
 
-        TPartsRequester(TActorId notifyId, size_t batchSize, TQueue<TLogoBlobID> parts, TReplQuoter::TPtr quoter, TIntrusivePtr<TBlobStorageGroupInfo> gInfo, TQueueActorMapPtr queueActorMapPtr)
+        TPartsRequester(
+            TActorId notifyId,
+            size_t batchSize,
+            TQueue<TLogoBlobID> parts,
+            TReplQuoter::TPtr quoter,
+            TIntrusivePtr<TBlobStorageGroupInfo> gInfo,
+            TQueueActorMapPtr queueActorMapPtr,
+            TDuration batchTimeout
+        )
             : NotifyId(notifyId)
             , BatchSize(batchSize)
             , Parts(std::move(parts))
             , Quoter(quoter)
             , GInfo(gInfo)
             , QueueActorMapPtr(queueActorMapPtr)
+            , BatchTimeout(batchTimeout)
             , Result(Reserve(BatchSize))
-            , Responses(0)
-            , ExpectedResponses(0)
         {}
 
+        ui64 MakeCookie(ui32 itemIndex) {
+            return BatchId * BatchSize + itemIndex;
+        }
+
+        std::pair<ui32, ui32> ParseCookie(ui64 cookie) {
+            return {cookie / BatchSize, cookie % BatchSize};
+        }
+
         void ScheduleJobQuant(const TActorId& selfId) {
+            if (ExpectedResponses != 0) {
+                return;
+            }
+
+            CurBatchStart = TlsActivationContext->Now();
             Result.resize(Min(Parts.size(), BatchSize));
-            ExpectedResponses = 0;
             for (ui64 i = 0; i < BatchSize && !Parts.empty(); ++i) {
                 auto key = Parts.front();
                 Parts.pop();
@@ -60,7 +82,7 @@ namespace {
                 // query which would tell us which parts are realy on main (not by ingress)
                 auto ev = TEvBlobStorage::TEvVGet::CreateExtremeIndexQuery(
                     vDiskId, TInstant::Max(), NKikimrBlobStorage::EGetHandleClass::AsyncRead,
-                    TEvBlobStorage::TEvVGet::EFlags::None, i,
+                    TEvBlobStorage::TEvVGet::EFlags::None, MakeCookie(i),
                     {{key.FullID(), 0, 0}}
                 );
                 ui32 msgSize = ev->CalculateSerializedSize();
@@ -74,7 +96,10 @@ namespace {
         }
 
         std::pair<std::optional<TVector<TPartOnMain>>, ui32> TryGetResults() {
-            if (ExpectedResponses == Responses) {
+            if (ExpectedResponses == Responses || CurBatchStart + BatchTimeout <= TlsActivationContext->Now()) {
+                if (ExpectedResponses != 0) {
+                    ++BatchId;
+                }
                 ExpectedResponses = 0;
                 Responses = 0;
                 return {std::move(Result), Parts.size()};
@@ -82,13 +107,18 @@ namespace {
             return {std::nullopt, Parts.size()};
         }
 
-        void Handle(TEvBlobStorage::TEvVGetResult::TPtr ev) {
+        void Handle(TEvBlobStorage::TEvVGetResult::TPtr ev, const TString& vDiskLogPrefix) {
             ++Responses;
             auto msg = ev->Get()->Record;
             if (msg.GetStatus() != NKikimrProto::EReplyStatus::OK) {
+                STLOG(PRI_ERROR, BS_VDISK_BALANCING, BSVB19, VDISKP(vDiskLogPrefix, "Failed to get parts from main"), (Status, msg.GetStatus()));
                 return;
             }
-            ui64 i = msg.GetCookie();
+            const auto& [batchId, i] = ParseCookie(msg.GetCookie());
+            if (batchId != BatchId) {
+                STLOG(PRI_ERROR, BS_VDISK_BALANCING, BSVB20, VDISKP(vDiskLogPrefix, "Got response for old batch"), (BatchId, BatchId), (Cookie, msg.GetCookie()));
+                return;
+            }
             auto res = msg.GetResult().at(0);
             for (ui32 partId: res.GetParts()) {
                 if (partId == Result[i].Key.PartId()) {
@@ -116,10 +146,11 @@ namespace {
         void ScheduleJobQuant() {
             PartsRequester.ScheduleJobQuant(SelfId());
             TryProcessResults();
+            Schedule(BATCH_TIMEOUT, new NActors::TEvents::TEvWakeup());
         }
 
         void Handle(TEvBlobStorage::TEvVGetResult::TPtr ev) {
-            PartsRequester.Handle(ev);
+            PartsRequester.Handle(ev, Ctx->VCtx->VDiskLogPrefix);
             TryProcessResults();
         }
 
@@ -174,6 +205,9 @@ namespace {
             hFunc(TEvVGenerationChange, Handle)
         );
 
+        constexpr static ui32 BATCH_SIZE = 32;
+        constexpr static TDuration BATCH_TIMEOUT = TDuration::Seconds(30);
+
     public:
         TDeleter() = default;
         TDeleter(
@@ -185,7 +219,7 @@ namespace {
             : NotifyId(notifyId)
             , Ctx(ctx)
             , GInfo(ctx->GInfo)
-            , PartsRequester(SelfId(), 32, std::move(parts), Ctx->VCtx->ReplNodeRequestQuoter, GInfo, queueActorMapPtr)
+            , PartsRequester(SelfId(), BATCH_SIZE, std::move(parts), Ctx->VCtx->ReplNodeRequestQuoter, GInfo, queueActorMapPtr, BATCH_TIMEOUT)
         {
         }
 
