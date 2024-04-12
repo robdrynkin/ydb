@@ -35,8 +35,9 @@ namespace {
         THashMap<ui64, TPart> ResultMap;
         std::mt19937_64 Gen64;
 
-        TVector<std::tuple<ui64, TLogoBlobID, TDiskPart>> ExpectedParts;
-        TVector<std::tuple<ui64, TLogoBlobID, TDiskPart, NKikimrProto::EReplyStatus>> ReceivedParts;
+        std::vector<std::tuple<ui64, TLogoBlobID, TDiskPart>> ExpectedParts;
+        std::vector<std::tuple<ui64, TLogoBlobID, TDiskPart, NKikimrProto::EReplyStatus>> ReceivedParts;
+        ui32 InMemoryParts = 0;
 
     public:
 
@@ -59,6 +60,7 @@ namespace {
         }
 
         void ScheduleJobQuant(const TActorId& selfId) {
+            Y_DEBUG_ABORT_UNLESS(ExpectedResponses == 0 && Responses == 0);
             // Result.resize(Min(Parts.size(), BatchSize));
             ResultMap.clear();
             ExpectedResponses = 0;
@@ -85,6 +87,7 @@ namespace {
                         ResultMap[key].PartsData = {data};
                         // Result[i].PartsData = {data};
                         ++Responses;
+                        ++InMemoryParts;
                     },
                     [&](const TDiskPart& diskPart) {
                         auto ev = std::make_unique<NPDisk::TEvChunkRead>(
@@ -108,6 +111,7 @@ namespace {
                     }
                 }, item.PartData);
                 ++ExpectedResponses;
+                Y_DEBUG_ABORT_UNLESS(ExpectedParts.size() + InMemoryParts == BatchSize * BatchId + ExpectedResponses);
             }
         }
 
@@ -133,9 +137,25 @@ namespace {
             ++Responses;
             auto *msg = ev->Get();
             ui64 cookie = reinterpret_cast<ui64>(msg->Cookie);
+            if (!ResultMap.contains(cookie)) {
+                // Cerr << "ExpectedParts: ";
+                for (const auto& [cookie, key, part] : ExpectedParts) {
+                    STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB13, VDISKP(vDiskLogPrefix, "ExpectedParts"), (Cookie, cookie), (Key, key.ToString()), (ChunkIdx, part.ChunkIdx), (Offset, part.Offset), (Size, part.Size));
+                    // Cerr << "(" << cookie << ", " << key.ToString() << ", " << part.ChunkIdx << ", " << part.Offset << ", " << part.Size << "), ";
+                }
+                // Cerr << Endl;
+                // Cerr << "ReceivedParts: ";
+                for (const auto& [cookie, key, part, status] : ReceivedParts) {
+                    STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB13, VDISKP(vDiskLogPrefix, "ReceivedParts"), (Cookie, cookie), (Key, key.ToString()), (ChunkIdx, part.ChunkIdx), (Offset, part.Offset), (Size, part.Size), (Status, status));
+                    // Cerr << "(" << cookie << ", " << key.ToString() << ", " << part.ChunkIdx << ", " << part.Offset << ", " << part.Size << ", " << status << "), ";
+                }
+                // Cerr << Endl;
+            }
             Y_DEBUG_ABORT_UNLESS(ResultMap.contains(cookie));
             auto& res = ResultMap[cookie];
             ReceivedParts.emplace_back(cookie, res.Key, TDiskPart{msg->ChunkIdx, msg->Offset, static_cast<ui32>(msg->Data.ToString().GetSize())}, msg->Status);
+
+            Y_DEBUG_ABORT_UNLESS(ReceivedParts.size() + InMemoryParts == BatchSize * BatchId + Responses);
 
             if (msg->Status != NKikimrProto::EReplyStatus::OK) {
                 STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB15, VDISKP(vDiskLogPrefix, "TEvChunkRead failed"), (Status, msg->Status));
