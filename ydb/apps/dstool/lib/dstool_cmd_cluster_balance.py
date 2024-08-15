@@ -192,7 +192,7 @@ def do(args):
                 vslots_by_pdisk_available_space.append((available_space, vslot))
 
         # check vslots from pdisks with the lowest available space first
-        for _, vslot in sorted(vslots_by_pdisk_available_space, key=lambda x: (x[0], x[1].AllocatedSize)):
+        for _, vslot in sorted(vslots_by_pdisk_available_space, key=lambda x: (x[0], -x[1].AllocatedSize)):
             print("try to reassign", vslot, pdisk_map[common.get_pdisk_id(vslot.VSlotId)])
             if do_reassign(vslot, False):
                 break
