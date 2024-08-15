@@ -182,25 +182,25 @@ def do(args):
             return True
         # end of do_reassign()
 
-        vslots_by_pdisk_slot_usage = defaultdict(list)
+
+        vslots_by_pdisk_available_space = []
         for vslot in candidate_vslots:
             pdisk_id = common.get_pdisk_id(vslot.VSlotId)
-            pdisk_slot_usage = pdisk_usage[pdisk_id]
-            vslots_by_pdisk_slot_usage[pdisk_slot_usage].append(vslot)
+            pdisk = pdisk_map[pdisk_id]
+            available_space = pdisk.PDiskMetrics.AvailableSize
+            if "NVME" in pdisk.Path:
+                vslots_by_pdisk_available_space.append((available_space, vslot))
+                # print(vslot, pdisk)
 
+        vslots_by_pdisk_available_space = sorted(vslots_by_pdisk_available_space, key=lambda x: (x[0], x[1].AllocatedSize))
+        # print(vslots_by_pdisk_available_space)
+
+        assert args.dry_run
         # check vslots from pdisks with the highest slot usage first
-        for pdisk_slot_usage, vslots in sorted(vslots_by_pdisk_slot_usage.items(), reverse=True):
-            random.shuffle(vslots)
-            for vslot in vslots:
-                if do_reassign(vslot, False):
-                    break
-            else:
-                for vslot in vslots:
-                    if do_reassign(vslot, True):
-                        break
-                else:
-                    continue
-            break
+        for _, vslot in sorted(vslots_by_pdisk_available_space, key=lambda x: x[0]):
+            print("try to reassign", vslot, pdisk_map[common.get_pdisk_id(vslot.VSlotId)])
+            if do_reassign(vslot, False):
+                break
         else:
             common.print_status(args, success=True, error_reason='')
             break
