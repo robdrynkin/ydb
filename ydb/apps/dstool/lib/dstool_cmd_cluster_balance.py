@@ -190,14 +190,9 @@ def do(args):
             available_space = pdisk.PDiskMetrics.AvailableSize
             if "NVME" in pdisk.Path:
                 vslots_by_pdisk_available_space.append((available_space, vslot))
-                # print(vslot, pdisk)
 
-        vslots_by_pdisk_available_space = sorted(vslots_by_pdisk_available_space, key=lambda x: (x[0], x[1].AllocatedSize))
-        # print(vslots_by_pdisk_available_space)
-
-        assert args.dry_run
-        # check vslots from pdisks with the highest slot usage first
-        for _, vslot in sorted(vslots_by_pdisk_available_space, key=lambda x: x[0]):
+        # check vslots from pdisks with the lowest available space first
+        for _, vslot in sorted(vslots_by_pdisk_available_space, key=lambda x: (x[0], x[1].AllocatedSize)):
             print("try to reassign", vslot, pdisk_map[common.get_pdisk_id(vslot.VSlotId)])
             if do_reassign(vslot, False):
                 break
