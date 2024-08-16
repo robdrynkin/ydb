@@ -225,7 +225,11 @@ def do(args):
             if len(pdisk["DonorVSlots"]) >= args.max_donors_per_pdisk:
                 continue
 
+            reassign_started = False
             random.shuffle(pdisk["CandidateVSlots"])
             for vslot in pdisk["CandidateVSlots"]:
                 if do_reassign(vslot, False):
+                    reassign_started = True
                     break
+            if reassign_started:
+                break
