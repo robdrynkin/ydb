@@ -10,7 +10,7 @@ description = 'Move vdisks out from overpopulated pdisks.'
 def add_options(p):
     p.add_argument('--max-replicating-pdisks', type=int, help='Limit number of maximum replicating PDisks in the cluster')
     p.add_argument('--only-from-overpopulated-pdisks', action='store_true', help='Move vdisks out only from pdisks with over expected slot count')
-    p.add_argument('--max-donors-per-pdisk', type=int, help='Limit number of donors per pdisk')
+    p.add_argument('--max-donors-per-pdisk', type=int, default=1, help='Limit number of donors per pdisk')
     p.add_argument('--storage-pool-names', type=lambda x: x.split(','), help='Comma separated storage pool names to balance')
     common.add_basic_format_options(p)
 
@@ -221,8 +221,8 @@ def do(args):
                 pdisk_id = common.get_pdisk_id(donor.VSlotId)
                 pdisks[pdisk_id]["DonorVSlots"].append(donor)
 
-        for pdisk in sorted(pdisks.values(), key=lambda x: x["AvailableSize"] / x["TotalSize"])[:10]:
-            if args.max_donors_per_pdisk and len(pdisk["DonorVSlots"]) >= args.max_donors_per_pdisk:
+        for pdisk in sorted(pdisks.values(), key=lambda x: x["AvailableSize"] / x["TotalSize"]):
+            if len(pdisk["DonorVSlots"]) >= args.max_donors_per_pdisk:
                 continue
 
             random.shuffle(pdisk["CandidateVSlots"])
