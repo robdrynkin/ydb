@@ -64,6 +64,7 @@ public:
         , StartTime(TInstant::Now())
         , KeepSession(ev->Get()->GetKeepSession() || longSession)
         , UserToken(ev->Get()->GetUserToken())
+        , ClientAddress(ev->Get()->GetClientAddress())
         , StartedAt(startedAt)
     {
         RequestEv.reset(ev->Release().Release());
@@ -76,11 +77,14 @@ public:
             }
         }
 
+        YQL_ENSURE(RequestEv->HasAction());
+        QueryAction = RequestEv->GetAction();
+        QueryType = RequestEv->GetType();
+
         SetQueryDeadlines(tableServiceConfig, queryServiceConfig);
-        auto action = GetAction();
         KqpSessionSpan = NWilson::TSpan(
             TWilsonKqp::KqpSession, std::move(ev->TraceId),
-            "Session.query." + NKikimrKqp::EQueryAction_Name(action), NWilson::EFlags::AUTO_END);
+            "Session.query." + NKikimrKqp::EQueryAction_Name(QueryAction), NWilson::EFlags::AUTO_END);
         if (RequestEv->GetUserRequestContext()) {
             UserRequestContext = RequestEv->GetUserRequestContext();
         } else {
@@ -88,6 +92,7 @@ public:
         }
         UserRequestContext->PoolId = RequestEv->GetPoolId();
         UserRequestContext->PoolConfig = RequestEv->GetPoolConfig();
+        UserRequestContext->DatabaseId = RequestEv->GetDatabaseId();
     }
 
     // the monotonously growing counter, the ordinal number of the query,
@@ -109,6 +114,8 @@ public:
     TKqpStatsCompile CompileStats;
     TIntrusivePtr<TKqpTransactionContext> TxCtx;
     TQueryData::TPtr QueryData;
+    NKikimrKqp::EQueryAction QueryAction;
+    NKikimrKqp::EQueryType QueryType;
 
     TActorId RequestActorId;
 
@@ -122,7 +129,9 @@ public:
     TKqpQueryStats QueryStats;
     bool KeepSession = false;
     TIntrusiveConstPtr<NACLib::TUserToken> UserToken;
+    TString ClientAddress;
     NActors::TMonotonic StartedAt;
+    bool CompilationRunning = false;
 
     THashMap<NKikimr::TTableId, ui64> TableVersions;
 
@@ -161,7 +170,7 @@ public:
     TMaybe<TString> CommandTagName;
 
     NKikimrKqp::EQueryAction GetAction() const {
-        return RequestEv->GetAction();
+        return QueryAction;
     }
 
     bool GetKeepSession() const {
@@ -177,7 +186,7 @@ public:
     }
 
     NKikimrKqp::EQueryType GetType() const {
-        return RequestEv->GetType();
+        return QueryType;
     }
 
     Ydb::Query::Syntax GetSyntax() const {
@@ -194,10 +203,6 @@ public:
 
     TVector<NKikimrKqp::TParameterDescription> GetResultParams() const {
         return ResultParams;
-    }
-
-    void EnsureAction() {
-        YQL_ENSURE(RequestEv->HasAction());
     }
 
     bool GetUsePublicResponseDataFormat() const {
@@ -344,6 +349,11 @@ public:
 
         if (HasTxSinkInTx(tx)) {
             // At current time transactional internal sinks require separate tnx with commit.
+            return false;
+        }
+
+        if (TxCtx->HasOlapTable) {
+            // HTAP/OLAP transactions always use separate commit.
             return false;
         }
 

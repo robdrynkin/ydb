@@ -7,6 +7,7 @@
 #include <ydb/core/actorlib_impl/long_timer.h>
 #include <ydb/core/base/appdata.h>
 #include <ydb/core/base/feature_flags.h>
+#include <ydb/core/grpc_services/grpc_integrity_trails.h>
 #include <ydb/library/ydb_issue/issue_helpers.h>
 #include <ydb/core/kqp/executer_actor/kqp_executer.h>
 
@@ -49,7 +50,7 @@ namespace {
         {}
 
         NKqp::TEvKqp::TEvDataQueryStreamPart::TPtr Handle;
-        google::protobuf::RepeatedPtrField<NKikimrMiniKQL::TResult>::const_iterator ResultIterator;
+        google::protobuf::RepeatedPtrField<Ydb::ResultSet>::const_iterator ResultIterator;
     };
 
     enum EStreamRpcWakeupTag : ui64 {
@@ -156,6 +157,7 @@ private:
         const auto traceId = Request_->GetTraceId();
 
         AuditContextAppend(Request_.get(), *req);
+        NDataIntegrity::LogIntegrityTrails(traceId, *GetProtoRequest(), ctx);
 
         auto script = req->script();
 
@@ -218,7 +220,7 @@ private:
         auto result = response.mutable_result();
 
         try {
-            NKqp::ConvertKqpQueryResultToDbResult(kqpResult, result->mutable_result_set());
+            result->mutable_result_set()->CopyFrom(kqpResult);
         } catch (std::exception ex) {
             ReplyFinishStream(ex.what());
         }
@@ -341,7 +343,9 @@ private:
     }
 
     // Final response
-    void Handle(NKqp::TEvKqp::TEvQueryResponse::TPtr& ev, const TActorContext&) {
+    void Handle(NKqp::TEvKqp::TEvQueryResponse::TPtr& ev, const TActorContext& ctx) {
+        NDataIntegrity::LogIntegrityTrails(Request_->GetTraceId(), *GetProtoRequest(), ev, ctx);
+
         auto& record = ev->Get()->Record.GetRef();
 
         NYql::TIssues issues;

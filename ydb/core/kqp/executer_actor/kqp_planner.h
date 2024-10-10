@@ -43,6 +43,8 @@ public:
     struct TArgs {
         TKqpTasksGraph& TasksGraph;
         const ui64 TxId;
+        const TMaybe<ui64> LockTxId;
+        const ui32 LockNodeId;
         const TActorId& Executer;
         const IKqpGateway::TKqpSnapshot& Snapshot;
         const TString& Database;
@@ -66,6 +68,7 @@ public:
         const bool MayRunTasksLocally = false;
         const std::shared_ptr<NKikimr::NKqp::NRm::IKqpResourceManager>& ResourceManager_;
         const std::shared_ptr<NKikimr::NKqp::NComputeActor::IKqpNodeComputeActorFactory>& CaFactory_;
+        const NKikimrConfig::TTableServiceConfig::EBlockTrackingMode BlockTrackingMode;
     };
 
     TKqpPlanner(TKqpPlanner::TArgs&& args);
@@ -73,7 +76,7 @@ public:
     std::unique_ptr<IEventHandle> PlanExecution();
     std::unique_ptr<IEventHandle> AssignTasksToNodes();
     bool AcknowledgeCA(ui64 taskId, TActorId computeActor, const NYql::NDqProto::TEvComputeActorState* state);
-    void CompletedCA(ui64 taskId, TActorId computeActor);
+    bool CompletedCA(ui64 taskId, TActorId computeActor);
     void TaskNotStarted(ui64 taskId);
     TProgressStat::TEntry CalculateConsumptionUpdate();
     void ShiftConsumption();
@@ -101,6 +104,8 @@ private:
 
 private:
     const ui64 TxId;
+    const TMaybe<ui64> LockTxId;
+    const ui32 LockNodeId;
     const TActorId ExecuterId;
     TVector<ui64> ComputeTasks;
     THashMap<ui64, TVector<ui64>> TasksPerNode;
@@ -140,6 +145,7 @@ private:
     std::shared_ptr<NKikimr::NKqp::NComputeActor::IKqpNodeComputeActorFactory> CaFactory_;
     TIntrusivePtr<NRm::TTxState> TxInfo;
     TVector<TProgressStat> LastStats;
+    const NKikimrConfig::TTableServiceConfig::EBlockTrackingMode BlockTrackingMode;
 
 public:
     static bool UseMockEmptyPlanner;  // for tests: if true then use TKqpMockEmptyPlanner that leads to the error

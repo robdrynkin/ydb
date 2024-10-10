@@ -20,12 +20,32 @@ from _dart_fields import create_dart_record
 # 0.2 is 300 files per chunk for TIMEOUT(60) - default timeout for SIZE(SMALL)
 ESLINT_FILE_PROCESSING_TIME_DEFAULT = 0.2  # seconds per file
 
+COLOR_CODES = {
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "cyan": "36",
+    "reset": "49",
+}
+
+REQUIRED_MISSING = "~~required~~"
+
+
+class ConsoleColors(dict):
+    def __init__(self, color_codes):
+        for k, v in color_codes.items():
+            self.__dict__[k] = f"\033[0;{v}m"
+
+
+COLORS = ConsoleColors(COLOR_CODES)
+
 
 class TsTestType(StrEnum):
-    JEST = auto()
-    HERMIONE = auto()
-    PLAYWRIGHT = auto()
     ESLINT = auto()
+    HERMIONE = auto()
+    JEST = auto()
+    PLAYWRIGHT = auto()
+    PLAYWRIGHT_LARGE = auto()
     TSC_TYPECHECK = auto()
     TS_STYLELINT = auto()
 
@@ -47,19 +67,26 @@ TS_TEST_FIELDS_BASE = (
 )
 
 TS_TEST_SPECIFIC_FIELDS = {
-    TsTestType.JEST: (
+    TsTestType.ESLINT: (
         df.Size.from_unit,
+        df.TestCwd.moddir,
         df.Tag.from_unit,
         df.Requirements.from_unit,
+        df.EslintConfigPath.value,
+    ),
+    TsTestType.HERMIONE: (
+        df.Tag.from_unit_fat_external_no_retries,
+        df.Requirements.from_unit_with_full_network,
         df.ConfigPath.value,
         df.TsTestDataDirs.value,
         df.TsTestDataDirsRename.value,
         df.TsResources.value,
         df.TsTestForPath.value,
     ),
-    TsTestType.HERMIONE: (
-        df.Tag.from_unit_fat_external_no_retries,
-        df.Requirements.from_unit_with_full_network,
+    TsTestType.JEST: (
+        df.Size.from_unit,
+        df.Tag.from_unit,
+        df.Requirements.from_unit,
         df.ConfigPath.value,
         df.TsTestDataDirs.value,
         df.TsTestDataDirsRename.value,
@@ -76,12 +103,15 @@ TS_TEST_SPECIFIC_FIELDS = {
         df.TsResources.value,
         df.TsTestForPath.value,
     ),
-    TsTestType.ESLINT: (
+    TsTestType.PLAYWRIGHT_LARGE: (
+        df.ConfigPath.value,
         df.Size.from_unit,
-        df.TestCwd.moddir,
-        df.Tag.from_unit,
-        df.Requirements.from_unit,
-        df.EslintConfigPath.value,
+        df.Tag.from_unit_fat_external_no_retries,
+        df.Requirements.from_unit_with_full_network,
+        df.TsResources.value,
+        df.TsTestDataDirs.value,
+        df.TsTestDataDirsRename.value,
+        df.TsTestForPath.value,
     ),
     TsTestType.TSC_TYPECHECK: (
         df.Size.from_unit,
@@ -118,7 +148,7 @@ class PluginLogger(object):
                 parts.append(m if isinstance(m, str) else repr(m))
 
         # cyan color (code 36) for messages
-        return "\033[0;32m{}\033[0;49m\n\033[0;36m{}\033[0;49m".format(self.prefix, " ".join(parts))
+        return f"{COLORS.green}{self.prefix}{COLORS.reset}\n{COLORS.cyan}{" ".join(parts)}{COLORS.reset}"
 
     def info(self, *messages):
         if self.unit:
@@ -233,6 +263,15 @@ def on_set_package_manager(unit):
         if lf_path_resolved:
             pm_type = pm_key
             break
+
+    if pm_type == 'npm' and "devtools/dummy_arcadia/typescript/npm" not in source_path:
+        ymake.report_configure_error(
+            "\n"
+            "Project is configured to use npm as a package manager. \n"
+            "Only pnpm is supported at the moment.\n"
+            "Please follow the instruction to migrate your project:\n"
+            "https://docs.yandex-team.ru/frontend-in-arcadia/tutorials/migrate#migrate-to-pnpm"
+        )
 
     unit.on_peerdir_ts_resource(pm_type)
     unit.set(["PM_TYPE", pm_type])
@@ -566,6 +605,8 @@ def _setup_stylelint(unit):
     if not test_files:
         return
 
+    unit.on_peerdir_ts_resource("stylelint")
+
     from lib.nots.package_manager import constants
 
     recipes_value = unit.get("TEST_RECIPES_VALUE")
@@ -726,7 +767,7 @@ def on_node_modules_configure(unit):
 
             # YATOOL_PREBUILDER_0_7_0_RESOURCE_GLOBAL
             prebuilder_major = unit.get("YATOOL_PREBUILDER-ROOT-VAR-NAME").split("_")[2]
-            logger.info(f"Detected prebuilder \033[0;32mv{prebuilder_major}.x.x\033[0;49m")
+            logger.info(f"Detected prebuilder {COLORS.green}{prebuilder_major}.x.x{COLORS.reset}")
 
             if prebuilder_major == "0":
                 # TODO: FBP-1408
@@ -737,7 +778,7 @@ def on_node_modules_configure(unit):
                     ymake.report_configure_error(
                         "Project is configured to use @yatool/prebuilder. \n"
                         + "Some packages in the pnpm-lock.yaml are misconfigured.\n"
-                        + "Run \033[0;32m`ya tool nots update-lockfile`\033[0;49m to fix lockfile.\n"
+                        + "Run {COLORS.green}`ya tool nots update-lockfile`{COLORS.reset} to fix lockfile.\n"
                         + "All packages with `requiresBuild:true` have to be marked with `hasAddons:true/false`.\n"
                         + "Misconfigured keys: \n"
                         + "  - "
@@ -752,7 +793,7 @@ def on_node_modules_configure(unit):
                     ymake.report_configure_error(
                         "Project is configured to use @yatool/prebuilder. \n"
                         + "Some packages are misconfigured.\n"
-                        + "Run \033[0;32m`ya tool nots update-lockfile`\033[0;49m to fix pnpm-lock.yaml and package.json.\n"
+                        + "Run {COLORS.green}`ya tool nots update-lockfile`{COLORS.reset} to fix pnpm-lock.yaml and package.json.\n"
                         + "Validation details: \n"
                         + "\n".join(validation_messages)
                     )
@@ -771,7 +812,7 @@ def on_ts_test_for_configure(unit, test_runner, default_config, node_modules_fil
     unit.on_setup_extract_node_modules_recipe([for_mod_path])
     unit.on_setup_extract_output_tars_recipe([for_mod_path])
 
-    build_root = "$B" if test_runner == TsTestType.HERMIONE else "$(BUILD_ROOT)"
+    build_root = "$B" if test_runner in [TsTestType.HERMIONE, TsTestType.PLAYWRIGHT_LARGE] else "$(BUILD_ROOT)"
     unit.set(["TS_TEST_NM", os.path.join(build_root, for_mod_path, node_modules_filename)])
 
     config_path = unit.get("TS_TEST_CONFIG_PATH")
@@ -808,7 +849,7 @@ def on_ts_test_for_configure(unit, test_runner, default_config, node_modules_fil
 
     extra_deps = df.CustomDependencies.test_depends_only(unit, (), {})[df.CustomDependencies.KEY].split()
     dart_record[df.CustomDependencies.KEY] = " ".join(sort_uniq(deps + extra_deps))
-    if test_runner == TsTestType.HERMIONE:
+    if test_runner in [TsTestType.HERMIONE, TsTestType.PLAYWRIGHT_LARGE]:
         dart_record[df.Size.KEY] = "LARGE"
 
     data = ytest.dump_test(unit, dart_record)
@@ -846,12 +887,39 @@ def on_ts_files(unit, *files):
 
 
 @_with_report_configure_error
+def on_ts_large_files(unit, destination: str, *files: list[str]):
+    if destination == REQUIRED_MISSING:
+        ymake.report_configure_error(
+            "Macro TS_LARGE_FILES() requires to use DESTINATION parameter.\n"
+            "   TS_LARGE_FILES(\n"
+            "       DESTINATION some_dir\n"
+            "       large/file1\n"
+            "       large/file2\n"
+            "   )\n"
+            "Docs: https://docs.yandex-team.ru/frontend-in-arcadia/references/TS_PACKAGE#ts-large-files."
+        )
+        return
+
+    # TODO: FBP-1795
+    # ${BINDIR} prefix for input is important to resove to result of LARGE_FILES and not to SOURCEDIR
+    new_cmds = [
+        '$COPY_CMD ${{input;context=TEXT:"${{BINDIR}}/{0}"}} ${{output;noauto:"{1}/{0}"}}'.format(f, destination)
+        for f in files
+    ]
+    all_cmds = unit.get("_TS_FILES_COPY_CMD")
+    if all_cmds:
+        new_cmds.insert(0, all_cmds)
+    unit.set(["_TS_FILES_COPY_CMD", " && ".join(new_cmds)])
+
+
+@_with_report_configure_error
 def on_ts_package_check_files(unit):
     ts_files = unit.get("_TS_FILES_COPY_CMD")
     if ts_files == "":
         ymake.report_configure_error(
             "\n"
             "In the TS_PACKAGE module, you should define at least one file using the TS_FILES() macro.\n"
+            "If you use the TS_FILES_GLOB, check the expression. For example, use `src/**/*` instead of `src/*`.\n"
             "Docs: https://docs.yandex-team.ru/frontend-in-arcadia/references/TS_PACKAGE#ts-files."
         )
 

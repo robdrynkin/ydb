@@ -34,19 +34,50 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
     Y_UNIT_TEST(TraverseColumnTable) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
 
-        runtime.SimulateSleep(TDuration::Seconds(30));
+        WaitForSavedStatistics(runtime, tableInfo.PathId);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
 
-        UNIT_ASSERT(CheckCountMinSketch(countMin, 1000000));
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
     }
+
+    Y_UNIT_TEST(TraverseServerlessColumnTable) {
+        TTestEnv env(1, 1);
+        auto& runtime = *env.GetServer().GetRuntime();
+        auto databaseInfo = CreateServerlessDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
+
+        WaitForSavedStatistics(runtime, tableInfo.PathId);
+
+        auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
+
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
+    }
+
+    Y_UNIT_TEST(TraverseColumnTableRebootColumnshard) {
+        TTestEnv env(1, 1);
+        auto& runtime = *env.GetServer().GetRuntime();
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
+        auto sender = runtime.AllocateEdgeActor();
+
+        WaitForSavedStatistics(runtime, tableInfo.PathId);
+
+        RebootTablet(runtime, tableInfo.ShardIds[0], sender);
+
+        auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
+
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
+    }    
 
     Y_UNIT_TEST(TraverseColumnTableRebootSaTabletBeforeResolve) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
         auto sender = runtime.AllocateEdgeActor();
 
         TBlockEvents<TEvTxProxySchemeCache::TEvResolveKeySetResult> block(runtime);
@@ -56,22 +87,23 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
         runtime.WaitFor("2nd TEvResolveKeySetResult", [&]{ return block.size() >= 1; });
         block.Unblock(1);
         runtime.WaitFor("3rd TEvResolveKeySetResult", [&]{ return block.size() >= 1; });
-        
-        RebootTablet(runtime, tableInfo.SaTabletId, sender);
-        
-        block.Unblock();
-        block.Stop();        
 
-        runtime.SimulateSleep(TDuration::Seconds(10));
+        RebootTablet(runtime, tableInfo.SaTabletId, sender);
+
+        block.Unblock();
+        block.Stop();
+
+        WaitForSavedStatistics(runtime, tableInfo.PathId);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
-        UNIT_ASSERT(CheckCountMinSketch(countMin, 1000000));
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
     }
 
     Y_UNIT_TEST(TraverseColumnTableRebootSaTabletBeforeReqDistribution) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
         auto sender = runtime.AllocateEdgeActor();
 
         bool eventSeen = false;
@@ -85,13 +117,14 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
         RebootTablet(runtime, tableInfo.SaTabletId, sender);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
-        UNIT_ASSERT(CheckCountMinSketch(countMin, 1000000));
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
     }
 
     Y_UNIT_TEST(TraverseColumnTableRebootSaTabletBeforeAggregate) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
         auto sender = runtime.AllocateEdgeActor();
 
         bool eventSeen = false;
@@ -105,13 +138,14 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
         RebootTablet(runtime, tableInfo.SaTabletId, sender);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
-        UNIT_ASSERT(CheckCountMinSketch(countMin, 1000000));
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
     }
 
     Y_UNIT_TEST(TraverseColumnTableRebootSaTabletBeforeSave) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
         auto sender = runtime.AllocateEdgeActor();
 
         bool eventSeen = false;
@@ -125,13 +159,14 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
         RebootTablet(runtime, tableInfo.SaTabletId, sender);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
-        UNIT_ASSERT(CheckCountMinSketch(countMin, 1000000));
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
     }
 
     Y_UNIT_TEST(TraverseColumnTableRebootSaTabletInAggregate) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
         auto sender = runtime.AllocateEdgeActor();
 
         int observerCount = 0;
@@ -146,13 +181,14 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
         RebootTablet(runtime, tableInfo.SaTabletId, sender);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
-        UNIT_ASSERT(CheckCountMinSketch(countMin, 1000000));
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
     }
 
     Y_UNIT_TEST(TraverseColumnTableHiveDistributionZeroNodes) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
 
         bool observerFirstExec = true;
         auto observer = runtime.AddObserver<TEvHive::TEvResponseTabletDistribution>(
@@ -188,16 +224,17 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
             }
         });
 
-        runtime.SimulateSleep(TDuration::Seconds(30));
+        WaitForSavedStatistics(runtime, tableInfo.PathId);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
-        UNIT_ASSERT(CheckCountMinSketch(countMin, 1000000));
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
     }
 
     Y_UNIT_TEST(TraverseColumnTableHiveDistributionAbsentNodes) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
 
         bool observerFirstExec = true;
         auto observer = runtime.AddObserver<TEvHive::TEvResponseTabletDistribution>(
@@ -225,16 +262,17 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
             }
         });
 
-        runtime.SimulateSleep(TDuration::Seconds(30));
+        WaitForSavedStatistics(runtime, tableInfo.PathId);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
-        UNIT_ASSERT(CheckCountMinSketch(countMin, 1000000));
+        UNIT_ASSERT(CheckCountMinSketch(countMin, ColumnTableRowsNumber));
     }
 
     Y_UNIT_TEST(TraverseColumnTableAggrStatUnavailableNode) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
 
         bool observerFirstExec = true;
         auto observer = runtime.AddObserver<TEvStatistics::TEvAggregateStatisticsResponse>(
@@ -257,7 +295,7 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
             }
         });
 
-        runtime.SimulateSleep(TDuration::Seconds(30));
+        WaitForSavedStatistics(runtime, tableInfo.PathId);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
 
@@ -265,13 +303,14 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
         auto probe = countMin->Probe((const char *)&value, sizeof(value));
         Cerr << "probe = " << probe << Endl;
         const double eps = 1. / countMin->GetWidth();
-        UNIT_ASSERT(probe <= 1 + eps * 1100000);  // 10 for first round, 1 for second
+        UNIT_ASSERT(probe <= 1 + eps * ColumnTableRowsNumber * 1.1);  // 10 for first round, 1 for second
     }
 
     Y_UNIT_TEST(TraverseColumnTableAggrStatNonLocalTablet) {
         TTestEnv env(1, 1);
         auto& runtime = *env.GetServer().GetRuntime();
-        auto tableInfo = CreateDatabaseColumnTables(env, 1, 10)[0];
+        const auto databaseInfo = CreateDatabaseColumnTables(env, 1, 10);
+        const auto& tableInfo = databaseInfo.Tables[0];
 
         bool observerFirstExec = true;
         auto observer = runtime.AddObserver<TEvStatistics::TEvAggregateStatisticsResponse>(
@@ -294,7 +333,7 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
             }
         });
 
-        runtime.SimulateSleep(TDuration::Seconds(60));
+        WaitForSavedStatistics(runtime, tableInfo.PathId);
 
         auto countMin = ExtractCountMin(runtime, tableInfo.PathId);
 
@@ -302,7 +341,7 @@ Y_UNIT_TEST_SUITE(TraverseColumnShard) {
         auto probe = countMin->Probe((const char *)&value, sizeof(value));
         Cerr << "probe = " << probe << Endl;
         const double eps = 1. / countMin->GetWidth();
-        UNIT_ASSERT(probe <= 1 + eps * 1100000);  // 10 for first round, 1 for second
+        UNIT_ASSERT(probe <= 1 + eps * ColumnTableRowsNumber * 1.1);  // 10 for first round, 1 for second
     }
 
 }

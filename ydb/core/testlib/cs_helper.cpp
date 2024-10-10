@@ -198,7 +198,7 @@ TString THelper::GetTestTableSchema() const {
     return sb;
 }
 
-void THelper::CreateOlapTableWithStore(TString tableName /*= "olapTable"*/, TString storeName /*= "olapStore"*/, ui32 storeShardsCount /*= 4*/, ui32 tableShardsCount /*= 3*/) {
+void THelper::CreateSchemaOlapTablesWithStore(const TString tableSchema, TVector<TString> tableNames /*= "olapTable"*/, TString storeName /*= "olapStore"*/, ui32 storeShardsCount /*= 4*/, ui32 tableShardsCount /*= 3*/) {
     TActorId sender = Server.GetRuntime()->AllocateEdgeActor();
     CreateTestOlapStore(sender, Sprintf(R"(
             Name: "%s"
@@ -209,19 +209,51 @@ void THelper::CreateOlapTableWithStore(TString tableName /*= "olapTable"*/, TStr
                     %s
                 }
             }
-        )", storeName.c_str(), storeShardsCount, GetTestTableSchema().data()));
+        )", storeName.c_str(), storeShardsCount, tableSchema.data()));
 
     const TString shardingColumns = "[\"" + JoinSeq("\",\"", GetShardingColumns()) + "\"]";
 
-    TBase::CreateTestOlapTable(sender, storeName, Sprintf(R"(
-        Name: "%s"
-        ColumnShardCount: %d
-        Sharding {
-            HashSharding {
-                Function: %s
-                Columns: %s
+    for (const TString& tableName : tableNames) {
+        TBase::CreateTestOlapTable(sender, storeName, Sprintf(R"(
+            Name: "%s"
+            ColumnShardCount: %d
+            Sharding {
+                HashSharding {
+                    Function: %s
+                    Columns: %s
+                }
+            })", tableName.c_str(), tableShardsCount, ShardingMethod.data(), shardingColumns.c_str()));
+    }
+}
+
+void THelper::CreateOlapTablesWithStore(TVector<TString> tableNames /*= {"olapTable"}*/, TString storeName /*= "olapStore"*/, ui32 storeShardsCount /*= 4*/, ui32 tableShardsCount /*= 3*/) {
+        CreateSchemaOlapTablesWithStore(GetTestTableSchema(), tableNames, storeName, storeShardsCount, tableShardsCount);
+}
+
+void THelper::CreateSchemaOlapTables(const TString tableSchema, TVector<TString> tableNames, ui32 tableShardsCount) {
+    TActorId sender = Server.GetRuntime()->AllocateEdgeActor();
+
+    const TString shardingColumns = "[\"" + JoinSeq("\",\"", GetShardingColumns()) + "\"]";
+
+    for (const TString& tableName : tableNames) {
+        TBase::CreateTestOlapTable(sender, "", Sprintf(R"(
+            Name: "%s"
+            ColumnShardCount: %d
+            Sharding {
+                HashSharding {
+                    Function: %s
+                    Columns: %s
+                }
             }
-        })", tableName.c_str(), tableShardsCount, ShardingMethod.data(), shardingColumns.c_str()));
+            Schema {
+                %s
+            }
+        )", tableName.c_str(), tableShardsCount, ShardingMethod.data(), shardingColumns.c_str(), tableSchema.data()));
+    }
+}
+
+void THelper::CreateOlapTables(TVector<TString> tableNames /*= {"olapTable"}*/, ui32 tableShardsCount /*= 3*/) {
+        CreateSchemaOlapTables(GetTestTableSchema(), tableNames, tableShardsCount);
 }
 
 // Clickbench table

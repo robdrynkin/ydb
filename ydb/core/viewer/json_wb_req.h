@@ -38,7 +38,23 @@ public:
 
     void Bootstrap() override {
         const auto& params(Event->Get()->Request.GetParams());
-        SplitIds(params.Get("node_id"), ',', TBase::RequestSettings.FilterNodeIds);
+        std::vector<TNodeId> nodeIds;
+        SplitIds(params.Get("node_id"), ',', nodeIds);
+        if (!nodeIds.empty()) {
+            if (TBase::RequestSettings.FilterNodeIds.empty()) {
+                TBase::RequestSettings.FilterNodeIds = nodeIds;
+            } else {
+                std::sort(nodeIds.begin(), nodeIds.end());
+                std::sort(TBase::RequestSettings.FilterNodeIds.begin(), TBase::RequestSettings.FilterNodeIds.end());
+                std::vector<TNodeId> intersection;
+                std::set_intersection(nodeIds.begin(), nodeIds.end(), TBase::RequestSettings.FilterNodeIds.begin(), TBase::RequestSettings.FilterNodeIds.end(), std::back_inserter(intersection));
+                if (intersection.empty()) {
+                    TBase::RequestSettings.FilterNodeIds = {0};
+                } else {
+                    TBase::RequestSettings.FilterNodeIds = intersection;
+                }
+            }
+        }
         {
             TString merge = params.Get("merge");
             if (merge.empty() || merge == "1" || merge == "true") {
@@ -62,6 +78,13 @@ public:
         TBase::RequestSettings.RetryPeriod = TDuration::MilliSeconds(FromStringWithDefault<ui32>(params.Get("retry_period"), TBase::RequestSettings.RetryPeriod.MilliSeconds()));
         if (params.Has("static")) {
             TBase::RequestSettings.StaticNodesOnly = FromStringWithDefault<bool>(params.Get("static"), false);
+        }
+        if (params.Has("fields_required")) {
+            if (params.Get("fields_required") == "all") {
+                TBase::RequestSettings.FieldsRequired = {-1};
+            } else {
+                SplitIds(params.Get("fields_required"), ',', TBase::RequestSettings.FieldsRequired);
+            }
         }
         TBase::RequestSettings.Format = params.Get("format");
         TBase::Bootstrap();

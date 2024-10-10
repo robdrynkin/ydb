@@ -41,6 +41,7 @@ public:
         TVector<TString> AllowedSIDs;
         TString RedirectMainPageTo;
         TString Certificate;
+        ui32 MaxRequestsPerSecond = 0;
     };
 
     virtual ~TMon() = default;
@@ -60,6 +61,7 @@ public:
         bool UseAuth = true;
         TVector<TString> AllowedSIDs;
         bool SortPages = true;
+        TString MonServiceName = "utils";
     };
 
     virtual NMonitoring::IMonPage* RegisterActorPage(TRegisterActorPageFields fields) = 0;

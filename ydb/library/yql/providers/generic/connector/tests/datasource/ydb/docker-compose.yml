@@ -2,23 +2,27 @@ services:
   fq-connector-go:
     command: |
       sh -c "
-        echo \"$$(dig fq-tests-ydb-ydb +short) fq-tests-ydb-ydb\" >> /etc/hosts; cat /etc/hosts;
+        apk add dnsmasq bind;
+        echo \"address=/fq-tests-ydb-ydb/$$(dig fq-tests-ydb-ydb +short)\" >> /etc/dnsmasq.conf;
+        echo \"nameserver 127.0.0.1\" > /etc/resolv.conf;
+        dnsmasq;
         /opt/ydb/bin/fq-connector-go server -c /opt/ydb/cfg/fq-connector-go.yaml"
     container_name: fq-tests-ydb-fq-connector-go
-    image: ghcr.io/ydb-platform/fq-connector-go:v0.5.5-rc.2@sha256:eac7a3107f4357d515573dd0907c76227726ffe54e612e580d52c33488b06ef5
+    image: ghcr.io/ydb-platform/fq-connector-go:v0.5.11-rc.2@sha256:ebfbcd210546e60ea87cd9386c5744f9395ba36c2259aa4d29246ed39c631dfd
     ports:
-    - 2130
+      - 2130
     volumes:
-    - ../../fq-connector-go/:/opt/ydb/cfg/
+      - ../../fq-connector-go/:/opt/ydb/cfg/
   ydb:
     container_name: fq-tests-ydb-ydb
     environment:
+      DB_USE_IN_MEMORY_PDISKS: "true"
       POSTGRES_PASSWORD: password
       POSTGRES_USER: user
       YDB_DEFAULT_LOG_LEVEL: DEBUG
     hostname: fq-tests-ydb-ydb
     image: ghcr.io/ydb-platform/local-ydb:latest@sha256:9045e00afec1923dc3277564c7b2f829087c2115f45f18e1d38b80bb89f98be6
     volumes:
-    - ./init/init_ydb:/init_ydb
-    - ./init/01_basic.sh:/01_basic.sh
+      - ./init/init_ydb:/init_ydb
+      - ./init/01_basic.sh:/01_basic.sh
 version: "3.4"

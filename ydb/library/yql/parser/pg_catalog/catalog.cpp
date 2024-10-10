@@ -476,10 +476,12 @@ public:
         } else if (key == "prosrc") {
             LastProc.Src = value;
         } else if (key == "prolang") {
-            if (value != "c") {
-                IsSupported = false;
-            } else {
+            if (value == "sql") {
+                LastProc.Lang = LangSQL;
+            } else if (value == "c") {
                 LastProc.Lang = LangC;
+            } else {
+                IsSupported = false;
             }
         } else if (key == "proargtypes") {
             TVector<TString> strArgs;
@@ -2272,6 +2274,8 @@ struct TCatalog : public IExtensionSqlBuilder {
 
         bool AllowAllFunctions = false;
         THashSet<TString> AllowedProcs;
+
+        bool SystemFunctionInit = false;
     };
 
     mutable TMaybe<TFile> ExportFile;
@@ -2977,6 +2981,7 @@ std::variant<const TProcDesc*, const TTypeDesc*> LookupProcWithCasts(const TStri
         if (NPrivate::IsExactMatch(d->ArgTypes, d->VariadicType, argTypeIds)) {
             // At most one exact match is possible, so look no further
             // https://www.postgresql.org/docs/14/typeconv-func.html, step 2
+            catalog.ExportFunction(d->Name);
             return d;
         }
 
@@ -3027,6 +3032,7 @@ std::variant<const TProcDesc*, const TTypeDesc*> LookupProcWithCasts(const TStri
     switch (candidates.size()) {
         case 1:
             // https://www.postgresql.org/docs/14/typeconv-func.html, end of steps 4.a, 4.c or 4.d
+            catalog.ExportFunction(candidates[0]->Name);
             return candidates[0];
 
         case 0:
@@ -3044,6 +3050,7 @@ std::variant<const TProcDesc*, const TTypeDesc*> LookupProcWithCasts(const TStri
 
     if (1 == candidates.size()) {
         // https://www.postgresql.org/docs/14/typeconv-func.html, end of step 4.e
+        catalog.ExportFunction(candidates[0]->Name);
         return candidates[0];
     }
 
@@ -3080,6 +3087,7 @@ std::variant<const TProcDesc*, const TTypeDesc*> LookupProcWithCasts(const TStri
             }
 
             if (finalCandidate) {
+                catalog.ExportFunction(finalCandidate->Name);
                 return finalCandidate;
             }
         }
@@ -3598,6 +3606,52 @@ void AllowFunction(const TString& name) {
     }
 }
 
+struct TSqlLanguageParserHolder {
+    std::unique_ptr<ISqlLanguageParser> Parser;
+};
+
+void SetSqlLanguageParser(std::unique_ptr<ISqlLanguageParser> parser) {
+    Singleton<TSqlLanguageParserHolder>()->Parser = std::move(parser);
+}
+
+ISqlLanguageParser* GetSqlLanguageParser() {
+    return Singleton<TSqlLanguageParserHolder>()->Parser.get();
+}
+
+void LoadSystemFunctions(ISystemFunctionsParser& parser) {
+    auto& catalog = TCatalog::MutableInstance();
+    with_lock (catalog.ExtensionsGuard) {
+        if (catalog.State->SystemFunctionInit) {
+            return;
+        }
+        
+        TString data;
+        Y_ENSURE(NResource::FindExact("system_functions.sql", &data));
+        TVector<TProcDesc> procs;
+        parser.Parse(data, procs);
+        for (const auto& p : procs) {
+            auto procIdPtr = catalog.State->ProcByName.FindPtr(p.Name);
+            Y_ENSURE(procIdPtr);
+            TProcDesc* foundProc = nullptr;
+            for (auto procId : *procIdPtr) {
+                auto procPtr = catalog.State->Procs.FindPtr(procId);
+                Y_ENSURE(procPtr);
+                if (procPtr->ArgTypes == p.ArgTypes && procPtr->VariadicType == p.VariadicType) {
+                    foundProc = procPtr;
+                    break;
+                }
+            }
+
+            Y_ENSURE(foundProc);
+            foundProc->DefaultArgs = p.DefaultArgs;
+            foundProc->Src = p.Src;
+            foundProc->ExprNode = p.ExprNode;
+        }
+
+        catalog.State->SystemFunctionInit = true;
+    }
+}
+
 void RegisterExtensions(const TVector<TExtensionDesc>& extensions, bool typesOnly,
     IExtensionSqlParser& parser, IExtensionLoader* loader) {
     if (extensions.size() > MaximumExtensionsCount) {
@@ -3625,7 +3679,7 @@ void RegisterExtensions(const TVector<TExtensionDesc>& extensions, bool typesOnl
                 throw yexception() << "Duplicated extension install name: " << e.InstallName;
             }
 
-            if (e.LibraryMD5.empty()) {
+            if (e.LibraryMD5.empty() && !e.LibraryPath.empty()) {
                 e.LibraryMD5 = MD5::File(e.LibraryPath);
             }
 
@@ -3637,7 +3691,7 @@ void RegisterExtensions(const TVector<TExtensionDesc>& extensions, bool typesOnl
             }
 
             parser.Parse(i + 1, sqls, catalog);
-            if (loader && !e.TypesOnly) {
+            if (loader && !e.TypesOnly && !e.LibraryPath.empty()) {
                 loader->Load(i + 1, e.Name, e.LibraryPath);
             }
         }
@@ -3988,13 +4042,20 @@ void ImportExtensions(const TString& exported, bool typesOnly, IExtensionLoader*
         Y_ENSURE(proto.ParseFromString(exported));
         for (ui32 i = 0; i < proto.ExtensionSize(); ++i) {
             const auto& protoExt = proto.GetExtension(i);
-            TExtensionDesc ext;
-            ext.Name = protoExt.GetName();
-            ext.InstallName = protoExt.GetInstallName();
-            ext.TypesOnly = protoExt.GetTypesOnly();
-            ext.LibraryMD5 = protoExt.GetLibraryMD5();
-            ext.LibraryPath = protoExt.GetLibraryPath();
-            catalog.State->Extensions.push_back(ext);
+            TExtensionDesc e;
+            e.Name = protoExt.GetName();
+            e.InstallName = protoExt.GetInstallName();
+            e.TypesOnly = protoExt.GetTypesOnly();
+            e.LibraryMD5 = protoExt.GetLibraryMD5();
+            e.LibraryPath = protoExt.GetLibraryPath();
+            catalog.State->Extensions.push_back(e);
+            if (!catalog.State->ExtensionsByName.insert(std::make_pair(e.Name, i + 1)).second) {
+                throw yexception() << "Duplicated extension name: " << e.Name;
+            }
+
+            if (!catalog.State->ExtensionsByInstallName.insert(std::make_pair(e.InstallName, i + 1)).second) {
+                throw yexception() << "Duplicated extension install name: " << e.InstallName;
+            }
         }
 
         for (const auto& protoType : proto.GetType()) {
