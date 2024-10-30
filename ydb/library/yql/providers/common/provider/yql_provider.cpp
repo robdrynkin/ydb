@@ -76,9 +76,9 @@ namespace {
         static const TString end = "_idx";
         static const TString delimiter = "_";
 
-        size_t sz = end.Size();
+        size_t sz = end.size();
         for (const auto& n: key)
-            sz += n.Value().Size() + delimiter.Size();
+            sz += n.Value().size() + delimiter.size();
 
         TString name(Reserve(sz));
         for (const auto& n: key) {
@@ -1155,12 +1155,15 @@ std::pair<IGraphTransformer::TStatus, TAsyncTransformCallbackFuture> FreezeUsedF
         return SyncError();
     }
 
+    if (types.QContext.CanRead()) {
+        return SyncOk();
+    }
+
     auto future = FreezeUserDataTableIfNeeded(types.UserDataStorage, files, urlDownloadFilter);
     if (future.Wait(TDuration::Zero())) {
         files = future.GetValue()();
         return SyncOk();
-    }
-    else {
+    } else {
         return std::make_pair(IGraphTransformer::TStatus::Async, future.Apply(
             [](const NThreading::TFuture<std::function<TUserDataTable()>>& completedFuture) {
                 return TAsyncTransformCallback([completedFuture](const TExprNode::TPtr& input, TExprNode::TPtr& output, TExprContext& ctx) {
@@ -1660,6 +1663,30 @@ bool ValidateFormatForInput(
             return false;
         }
     }
+    else if (schemaStructRowType && format == TStringBuf("json_list")) {
+        bool failedSchemaColumns = false;
+
+        for (const TItemExprType* item : schemaStructRowType->GetItems()) {
+            if (excludeFields && excludeFields(item->GetName())) {
+                continue;
+            }
+            const TTypeAnnotationNode* rowType = item->GetItemType();
+            if (rowType->GetKind() == ETypeAnnotationKind::Optional) {
+                rowType = rowType->Cast<TOptionalExprType>()->GetItemType();
+            }
+
+            if (rowType->GetKind() == ETypeAnnotationKind::Data
+                && IsDataTypeDateOrTzDateOrInterval(rowType->Cast<TDataExprType>()->GetSlot())) {
+                ctx.AddError(TIssue(TStringBuilder() << "Date, Timestamp and Interval types are not allowed in json_list format (you have '"
+                    << item->GetName() << " " << FormatType(rowType) << "' field)"));
+                failedSchemaColumns = true;
+            }
+        }
+
+        if (failedSchemaColumns) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -1775,7 +1802,7 @@ bool RenamePgSelectColumns(
     if (selectorColumnOrder->Size() > insertColumnOrder.Size()) {
         ctx.AddError(TIssue(ctx.GetPosition(node.Pos()), TStringBuilder() << Sprintf(
             "%s have %zu columns, INSERT INTO expects: %zu",
-            optionName.Data(),
+            optionName.data(),
             selectorColumnOrder->Size(),
             insertColumnOrder.Size()
         )));

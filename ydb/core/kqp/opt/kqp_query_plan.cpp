@@ -443,7 +443,7 @@ private:
     }
 
     ui32 AddOperator(TQueryPlanNode& planNode, const TString& name, TOperator op) {
-        if (!planNode.TypeName.Empty()) {
+        if (!planNode.TypeName.empty()) {
             planNode.TypeName += "-" + name;
         } else {
             planNode.TypeName = name;
@@ -720,15 +720,17 @@ private:
             }
         }
         for (const auto& child : node->Children()) {
-            std::shared_ptr<TOptimizerStatistics> result;
             if (child->IsLambda()) {
-                auto lambda = TExprBase(child).Cast<TCoLambda>();
-                result = FindWrapStats(lambda.Body().Ptr(), dataSourceNode);
+                // support wide lambda as well
+                for (size_t bodyIndex = 1; bodyIndex < child->ChildrenSize(); ++bodyIndex) {
+                    if (auto result = FindWrapStats(child->ChildPtr(bodyIndex), dataSourceNode)) {
+                        return result;
+                    }
+                }
             } else {
-                result = FindWrapStats(child, dataSourceNode);
-            }
-            if (result) {
-                return result;
+                if (auto result = FindWrapStats(child, dataSourceNode)) {
+                    return result;
+                }
             }
         }
         return nullptr;
@@ -875,7 +877,7 @@ private:
             CurrentArgContext.stack.pop_back();
 
             /* is that collect stage? */
-            if (stagePlanNode.TypeName.Empty()) {
+            if (stagePlanNode.TypeName.empty()) {
                 if (expr.Cast<TDqStageBase>().Program().Body().Maybe<TCoArgument>()) {
                     stagePlanNode.TypeName = "Collect";
                 } else {
@@ -893,7 +895,7 @@ private:
         } else {
             Visit(expr.Ptr(),  planNode);
 
-            if (planNode.TypeName.Empty()) {
+            if (planNode.TypeName.empty()) {
                 planNode.TypeName = "Stage";
             }
         }
@@ -1444,7 +1446,13 @@ private:
     }
 
     std::variant<ui32, TArgContext> Visit(const TCoFlatMapBase& flatMap, const TCoGraceJoinCore& join, TQueryPlanNode& planNode) {
-        const auto name = TStringBuilder() << join.JoinKind().Value() << "Join (Grace)";
+        auto joinAlgo = "(Grace)";
+        for (size_t i=0; i<join.Flags().Size(); i++) {
+            if (join.Flags().Item(i).StringValue() == "Broadcast") {
+                joinAlgo = "(MapJoin)";
+            }
+        }
+        const auto name = TStringBuilder() << join.JoinKind().Value() << "Join " << joinAlgo;
 
         TOperator op;
         op.Properties["Name"] = name;
@@ -1460,7 +1468,13 @@ private:
     }
 
     std::variant<ui32, TArgContext> Visit(const TCoGraceJoinCore& join, TQueryPlanNode& planNode) {
-        const auto name = TStringBuilder() << join.JoinKind().Value() << "Join (Grace)";
+        auto joinAlgo = "(Grace)";
+        for (size_t i=0; i<join.Flags().Size(); i++) {
+            if (join.Flags().Item(i).StringValue() == "Broadcast") {
+                joinAlgo = "(MapJoin)";
+            }
+        }
+        const auto name = TStringBuilder() << join.JoinKind().Value() << "Join " << joinAlgo;
 
         TOperator op;
         op.Properties["Name"] = name;
@@ -2349,7 +2363,7 @@ TString SerializeTxPlans(const TVector<const TString>& txPlans, TIntrusivePtr<NO
     writer.WriteKey("type").WriteString("query");
     writer.EndObject();
 
-    if (!commonPlanInfo.Empty()) {
+    if (!commonPlanInfo.empty()) {
         NJson::TJsonValue commonPlanJson;
         NJson::ReadJsonTree(commonPlanInfo, &commonPlanJson, true);
 

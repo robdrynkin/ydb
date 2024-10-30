@@ -16,7 +16,7 @@ const TString UdfResolver_ContainsModule = "UdfResolver_ContainsModule";
 TString MakeHash(const TString& str) {
     SHA256_CTX sha;
     SHA256_Init(&sha);
-    SHA256_Update(&sha, str.Data(), str.Size());
+    SHA256_Update(&sha, str.data(), str.size());
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256_Final(hash, &sha);
     return TString((const char*)hash, sizeof(hash));
@@ -109,6 +109,7 @@ private:
 
     TString SaveValue(const TFunction* f) const {
         auto node = NYT::TNode()
+            ("NormalizedName", f->NormalizedName)
             ("CallableType", TypeToYsonNode(f->CallableType));
         if (f->NormalizedUserType && f->NormalizedUserType->GetKind() != ETypeAnnotationKind::Void) {
             node("NormalizedUserType", TypeToYsonNode(f->NormalizedUserType));
@@ -131,6 +132,12 @@ private:
 
     void LoadValue(TFunction* f, const TString& value, TExprContext& ctx) const {
         auto node = NYT::NodeFromYsonString(value);
+        if (node.HasKey("NormalizedName")) {
+            f->NormalizedName = node["NormalizedName"].AsString();
+        } else {
+            f->NormalizedName = f->Name;
+        }
+
         f->CallableType = ParseTypeFromYson(node["CallableType"], ctx);
         if (node.HasKey("NormalizedUserType")) {
             f->NormalizedUserType = ParseTypeFromYson(node["NormalizedUserType"], ctx);
