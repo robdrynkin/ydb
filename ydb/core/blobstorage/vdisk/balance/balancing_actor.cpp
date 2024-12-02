@@ -186,6 +186,22 @@ namespace NBalancing {
                     }
                 }
 
+                // collect parts in a strange state to try to delete
+                if (Ctx->Cfg.EnableDelete) {
+                    auto handoffVec = merger.Ingress.GetVDiskHandoffVec(&top, Ctx->VCtx->ShortSelfVDisk, key);
+                    auto local = merger.Ingress.LocalParts(top.GType);
+                    auto missingParts = handoffVec & (~local);
+                    if (!missingParts.Empty()) {
+                        for (ui8 partIdx = missingParts.FirstPosition(); partIdx < missingParts.GetSize(); partIdx = missingParts.NextPosition(partIdx)) {
+                            STLOG(PRI_WARN, BS_VDISK_BALANCING, BSVB34, VDISKP(Ctx->VCtx, "Deleting part on node by handoff, but not by local"),
+                                (LogoBlobId, key.ToString()), (PartId, partIdx + 1));
+
+                            TryDeleteParts.Data.emplace_back(TLogoBlobID(key, partIdx + 1));
+                            STLOG(PRI_DEBUG, BS_VDISK_BALANCING, BSVB10, VDISKP(Ctx->VCtx, "Delete"), (LogoBlobId, TryDeleteParts.Data.back().ToString()));
+                        }
+                    }
+                }
+
                 if (SendOnMainParts.Size() >= Ctx->Cfg.MaxToSendPerEpoch && TryDeleteParts.Size() >= Ctx->Cfg.MaxToDeletePerEpoch) {
                     // reached the limit of parts to send and delete
                     break;
