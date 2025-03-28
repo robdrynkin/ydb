@@ -325,6 +325,13 @@ namespace NKikimr {
                     case EState::GetNextItem:
                         if (It.Valid()) {
                             const TKey& key = It.GetCurKey();
+                            if constexpr (std::is_same_v<TKey, TKeyLogoBlob>) {
+                                auto k = key.LogoBlobID();
+                                static const TLogoBlobID BAD_ID(72057594037936128ULL, 4, 3, 1, 3894, 24576);
+                                if (k.TabletID() == BAD_ID.TabletID() && k.Generation() == BAD_ID.Generation() && k.Step() == BAD_ID.Step() && k.Channel() == BAD_ID.Channel() && k.BlobSize() == BAD_ID.BlobSize()) {
+                                    FinishItem();
+                                }
+                            }
                             if (IsFirstKey) {
                                 IsFirstKey = false;
                             } else {
