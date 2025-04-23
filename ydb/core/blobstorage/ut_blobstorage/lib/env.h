@@ -667,7 +667,9 @@ struct TEnvironmentSetup {
                 for (const auto& [vdiskId, vdiskActorId] : vdisks) {
                     dyn.PushBackActorId(vdiskActorId);
                 }
-                return new TBlobStorageGroupInfo(std::move(topology), std::move(dyn), "storage_pool");
+                auto res = new TBlobStorageGroupInfo(std::move(topology), std::move(dyn), "storage_pool");
+                res->BlobDepotId = group.GetVirtualGroupInfo().GetBlobDepotId();
+                return res;
             }
         }
         return nullptr;

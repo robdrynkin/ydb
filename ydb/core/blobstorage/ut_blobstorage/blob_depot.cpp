@@ -1,5 +1,7 @@
+#include <ydb/core/blob_depot/agent/agent.h>
 #include <ydb/core/blobstorage/ut_blobstorage/lib/env.h>
 #include <ydb/core/blob_depot/events.h>
+#include <ydb/core/blob_depot/agent/events.h>
 
 #include "blob_depot_test_functions.h"
 
@@ -144,5 +146,39 @@ Y_UNIT_TEST_SUITE(BlobDepot) {
 
         TestVerifiedRandom(tenv, 8, 15, tenv.RegularGroups[0], 1000, 500, 10, { 10, 10, 3, 3, 2, 1, 1, 3, 3, 0 });
         // no blob depot restarts performed
+    }
+
+    Y_UNIT_TEST(CreateBlobDepot) {
+        ui32 seed;
+        LoadSeed(seed);
+        TBlobDepotTestEnvironment tenv(seed);
+        auto& env = *tenv.Env;
+        ui32 clientNode = 1;
+
+        auto groupInfo = env.GetGroupInfo(tenv.BlobDepot);
+        auto agent = CreateBlobDepotAgent(tenv.BlobDepot, groupInfo, TActorId());
+        
+        auto client = env.Runtime->AllocateEdgeActor(clientNode);
+        auto agentId = env.Runtime->Register(agent, clientNode);
+
+        // {   // TEvPut
+        //     TString data = tenv.DataGen(1024);
+        //     auto ev = new TEvBlobStorage::TEvPut(TLogoBlobID(1, 1, 1, 1, data.size(), 0), data, TInstant::Max());
+        //     env.Runtime->WrapInActorContext(client, [&] {
+        //         TActivationContext::Send(new IEventHandle(agentId, client, ev));
+        //     });
+        //     auto res = env.WaitForEdgeActorEvent<TEvBlobStorage::TEvPutResult>(client, true);
+        //     UNIT_ASSERT_VALUES_EQUAL(res->Release()->Status, NKikimrProto::OK);
+        // }
+
+        {   // TEvKVPut
+            TString data = tenv.DataGen(1024);
+            auto ev = new NBlobDepot::TEvKVPut(TString("key"), TRcBuf(data), TInstant::Max());
+            env.Runtime->WrapInActorContext(client, [&] {
+                TActivationContext::Send(new IEventHandle(agentId, client, ev));
+            });
+            auto res = env.WaitForEdgeActorEvent<NBlobDepot::TEvKVPutResult>(client, true);
+            UNIT_ASSERT_VALUES_EQUAL(res->Release()->Status, NKikimrProto::OK);
+        }
     }
 }

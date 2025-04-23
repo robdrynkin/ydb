@@ -101,6 +101,8 @@ namespace NKikimr::NBlobDepot {
                 }
             };
 
+            Cerr << "tablet: " << ev->GetTypeName() << " " << ev->GetTypeRewrite() << Endl;
+
             switch (const ui32 type = ev->GetTypeRewrite()) {
                 hFunc(TEvBlobDepot::TEvApplyConfig, Handle);
 

@@ -225,6 +225,9 @@ namespace NKikimr::NBlobDepot {
 
         void SwitchMode(EMode mode);
 
+        template<typename TEvent, typename TRequest>
+        friend class TPutQuery;
+
     private:
         struct TEvPrivate {
             enum {
@@ -250,6 +253,7 @@ namespace NKikimr::NBlobDepot {
 
 #define FORWARD_STORAGE_PROXY(TYPE) fFunc(TEvBlobStorage::TYPE, HandleStorageProxy);
         void StateFunc(STFUNC_SIG) {
+            Cerr << "agent:" << ev->GetTypeName() << " " << ev->GetTypeRewrite() << Endl;
             STRICT_STFUNC_BODY(
                 cFunc(TEvents::TSystem::Poison, PassAway);
                 hFunc(TEvBlobStorage::TEvConfigureProxy, Handle);
@@ -272,6 +276,8 @@ namespace NKikimr::NBlobDepot {
                 hFunc(TEvBlobStorage::TEvPutResult, HandleOtherResponse);
 
                 ENUMERATE_INCOMING_EVENTS(FORWARD_STORAGE_PROXY)
+                fFunc(TEvBlobStorage::EvKVPut, HandleStorageProxy)
+
                 fFunc(TEvBlobStorage::EvAssimilate, HandleAssimilate);
                 hFunc(TEvBlobStorage::TEvBunchOfEvents, Handle);
                 cFunc(TEvPrivate::EvProcessPendingEvent, HandleProcessPendingEvent);
@@ -436,7 +442,7 @@ namespace NKikimr::NBlobDepot {
             using TFinishCallback = std::function<void(std::optional<TString>, const char*)>;
             void IssueReadS3(const TString& key, ui32 offset, ui32 len, TFinishCallback finish, ui64 readId);
 
-            TActorId IssueWriteS3(TString&& key, TRope&& buffer, TLogoBlobID id);
+            TActorId IssueWriteS3(TString&& key, TRope&& buffer, const TString& blobKey);
 
         protected: // reading logic
             struct TReadContext;
@@ -464,18 +470,36 @@ namespace NKikimr::NBlobDepot {
             void DoDestroy();
         };
 
-        template<typename TEvent>
+        template<typename TEvent, typename TRequest=TEvent>
         class TBlobStorageQuery : public TQuery {
         public:
             TBlobStorageQuery(TBlobDepotAgent& agent, std::unique_ptr<IEventHandle> event, TMonotonic received)
                 : TQuery(agent, std::move(event), received)
-                , Request(*Event->Get<TEvent>())
+                , RequestStorage(GetRequestStorage())
+                , Request(GetRequest())
             {
                 ExecutionRelay = std::move(Request.ExecutionRelay);
             }
+    
+        private:
+            std::optional<TRequest> GetRequestStorage() {
+                if constexpr (std::is_same_v<TEvent, TRequest>) {
+                    return std::nullopt;
+                } else {
+                    return std::optional<TRequest>(std::in_place, *Event->Get<TEvent>());
+                }
+            }
+            TRequest& GetRequest() {
+                if constexpr (std::is_same_v<TEvent, TRequest>) {
+                    return *Event->Get<TRequest>();
+                } else {
+                    return *RequestStorage;
+                }
+            }
+            std::optional<TRequest> RequestStorage;
 
         protected:
-            TEvent& Request;
+            TRequest& Request;
         };
 
         struct TPendingEvent {

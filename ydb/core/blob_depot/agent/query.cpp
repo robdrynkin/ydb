@@ -1,5 +1,6 @@
 #include "agent_impl.h"
 #include "blocks.h"
+#include "events.h"
 
 namespace NKikimr::NBlobDepot {
 
@@ -9,6 +10,7 @@ namespace NKikimr::NBlobDepot {
 #define XX(TYPE) case TEvBlobStorage::TYPE: return CreateQuery<TEvBlobStorage::TYPE>(std::move(ev), received);
             ENUMERATE_INCOMING_EVENTS(XX)
 #undef XX
+            case TEvBlobStorage::EvKVPut: return CreateQuery<TEvBlobStorage::EvKVPut>(std::move(ev), received);
         }
         Y_ABORT();
     }
@@ -56,6 +58,7 @@ namespace NKikimr::NBlobDepot {
 #define XX(TYPE) case TEvBlobStorage::TYPE: size = p->Get<TEvBlobStorage::T##TYPE>()->CalculateSize(); break;
                 ENUMERATE_INCOMING_EVENTS(XX)
 #undef XX
+                case TEvBlobStorage::EvKVPut: size = p->Get<TEvKVPut>()->CalculateSize(); break;
             }
 
             if (size + PendingEventBytes > MaxPendingEventBytes) {
@@ -221,6 +224,10 @@ namespace NKikimr::NBlobDepot {
 
             ENUMERATE_INCOMING_EVENTS(XX)
 #undef XX
+            case TEvBlobStorage::EvKVPut:
+                response = Event->Get<TEvKVPut>()->MakeErrorResponse(status, errorReason, TGroupId::FromValue(Agent.VirtualGroupId));
+                static_cast<TEvKVPutResult&>(*response).ExecutionRelay = std::move(ExecutionRelay);
+                break;
         }
         Y_ABORT_UNLESS(response);
         Agent.SelfId().Send(Event->Sender, response.release(), 0, Event->Cookie);
@@ -251,6 +258,9 @@ namespace NKikimr::NBlobDepot {
 
             ENUMERATE_INCOMING_EVENTS(XX)
 #undef XX
+            case TEvBlobStorage::EvKVPutResult:
+                static_cast<TEvKVPutResult&>(*response).ExecutionRelay = std::move(ExecutionRelay);
+                break;
         }
         Agent.SelfId().Send(Event->Sender, response.release(), 0, Event->Cookie);
         OnDestroy(true);
@@ -303,6 +313,7 @@ namespace NKikimr::NBlobDepot {
 #define XX(TYPE) case TEvBlobStorage::TYPE: return #TYPE;
             ENUMERATE_INCOMING_EVENTS(XX)
 #undef XX
+            case TEvBlobStorage::EvKVPut: return "EvKVPut";
         }
         Y_ABORT();
     }

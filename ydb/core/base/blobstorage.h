@@ -941,6 +941,12 @@ struct TEvBlobStorage {
         EvIncrHugeReadLogResult,
         EvIncrHugeScanResult,
 
+        // blob depot kv interface
+        EvKVPut = EvPut + 18 * 512,
+        EvKVPutResult,
+        EvKVGet,
+        EvKVGetResult,
+
         EvEnd
     };
 

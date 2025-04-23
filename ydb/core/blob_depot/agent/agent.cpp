@@ -77,6 +77,10 @@ namespace NKikimr::NBlobDepot {
         } while (false);
 
         ENUMERATE_INCOMING_EVENTS(XX)
+        auto subgroup = requests->GetSubgroup("request", "EvKVPut");
+        RequestsReceived[TEvBlobStorage::EvKVPut] = subgroup->GetCounter("Received", true);
+        SuccessResponseTime[TEvBlobStorage::EvKVPut] = subgroup->GetNamedHistogram("sensor", "SuccessResponseTime_us", makeHist());
+        ErrorResponseTime[TEvBlobStorage::EvKVPut] = subgroup->GetNamedHistogram("sensor", "ErrorResponseTime_us", makeHist());
 #undef XX
 
         auto s3 = AgentCounters->GetSubgroup("subsystem", "s3");

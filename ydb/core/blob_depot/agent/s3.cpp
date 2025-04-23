@@ -89,7 +89,7 @@ namespace NKikimr::NBlobDepot {
         TActivationContext::Send(new IEventHandle(Agent.S3WrapperId, actorId, request.release(), IEventHandle::FlagTrackDelivery));
     }
 
-    TActorId TBlobDepotAgent::TQuery::IssueWriteS3(TString&& key, TRope&& buffer, TLogoBlobID id) {
+    TActorId TBlobDepotAgent::TQuery::IssueWriteS3(TString&& key, TRope&& buffer, const TString& blobKey) {
         class TWriteActor : public TActor<TWriteActor> {
             std::weak_ptr<TLifetimeToken> LifetimeToken;
             TQuery* const Query;
@@ -139,7 +139,7 @@ namespace NKikimr::NBlobDepot {
                 Aws::S3::Model::PutObjectRequest()
                     .WithBucket(std::move(Agent.S3BackendSettings->GetSettings().GetBucket()))
                     .WithKey(std::move(key))
-                    .AddMetadata("key", id.ToString()),
+                    .AddMetadata("key", blobKey),
                 buffer.ExtractUnderlyingContainerOrCopy<TString>()),
             IEventHandle::FlagTrackDelivery));
 
