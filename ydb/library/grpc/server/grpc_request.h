@@ -112,6 +112,10 @@ public:
         return FinishPromise_.GetFuture();
     }
 
+    NThreading::TFuture<TDuration> GetReqTimeFuture() override {
+        return FinishPromise2_.GetFuture();
+    }
+
     bool IsClientLost() const override {
         return ClientLost_.load();
     }
@@ -493,6 +497,7 @@ private:
         DecRequest();
         Counters_->FinishProcessing(RequestSize, ResponseSize, ok, ResponseStatus,
             TDuration::Seconds(RequestTimer.Passed()));
+        FinishPromise2_.SetValue(TDuration::Seconds(RequestTimer.Passed()));
         return false;
     }
 
@@ -576,6 +581,7 @@ private:
     using TFixedEvent = TQueueFixedEvent<TGRpcRequestImpl>;
     TFixedEvent OnFinishTag = { this, &TGRpcRequestImpl::OnFinish };
     NThreading::TPromise<EFinishStatus> FinishPromise_ = NThreading::NewPromise<EFinishStatus>();
+    NThreading::TPromise<TDuration> FinishPromise2_ = NThreading::NewPromise<TDuration>();
     bool SkipUpdateCountersOnError = false;
     IStreamAdaptor::TPtr StreamAdaptor_;
     std::atomic<bool> ClientLost_ = false;

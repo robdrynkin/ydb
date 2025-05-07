@@ -91,7 +91,26 @@ public:
         : Request(request)
         , PipeCache(MakePipePerNodeCacheID(true))
         , Span(TWilsonGrpc::RequestActor, Request->GetWilsonTraceId(), "ReadRowsRpc")
-    {}
+    {
+        std::shared_ptr<NWilson::TSpan> span = std::make_shared<NWilson::TSpan>(TWilsonGrpc::RequestActor, Span.GetTraceId(), "GrpcRequest");
+        auto* req = dynamic_cast<TEvReadRowsRequest*>(request);
+
+        req->GetReqTimeFuture().Subscribe(
+        [span](const NThreading::TFuture<TDuration>& result) mutable {
+            if (result.HasValue()) {
+                span->Attribute("duration", (long)result.GetValue().MilliSeconds());
+            }
+            span->End();
+        });
+
+        // req->SetCustomFinishWrapper(
+        // [span](std::function<void()>&&) mutable {
+        //     return [span](const NYdbGrpc::IRequestContextBase::TAsyncFinishResult&) mutable {
+        //         span->End();
+        //         return;
+        //     };
+        // });
+    }
 
     bool BuildSchema(NSchemeCache::TSchemeCacheNavigate* resolveNamesResult, TString& errorMessage) {
         Y_ABORT_UNLESS(resolveNamesResult);
@@ -669,6 +688,7 @@ public:
     void SendResult(const Ydb::StatusIds::StatusCode& status, const TString& errorMsg,
         const ::google::protobuf::RepeatedPtrField<Ydb::Issue::IssueMessage>* issues = nullptr)
     {
+        Span.Event("Start prepare response", {});
         auto* resp = CreateResponse();
         resp->set_status(status);
         if (!errorMsg.Empty() || issues) {
@@ -685,9 +705,11 @@ public:
         if (status == Ydb::StatusIds::SUCCESS) {
             Request->SetRuHeader(RuCost);
 
+            Span.Event("Serialize data", {});
             FillResultRows(resp);
         }
 
+        Span.Event("Reply", {});
         LOG_DEBUG_S(TlsActivationContext->AsActorContext(), NKikimrServices::RPC_REQUEST, "TReadRowsRPC sent result");
         Request->Reply(resp, status);
         PassAway();

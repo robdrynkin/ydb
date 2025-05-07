@@ -1052,6 +1052,10 @@ public:
         }
     }
 
+    NThreading::TFuture<TDuration> GetReqTimeFuture() {
+        return Ctx_->GetReqTimeFuture();
+    }
+
     const TMaybe<TString> GetYdbToken() const override {
         return ExtractYdbToken(Ctx_->GetPeerMetaValues(NYdb::YDB_AUTH_TICKET_HEADER));
     }

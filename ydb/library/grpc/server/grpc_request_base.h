@@ -120,6 +120,13 @@ public:
     //! Returns future to get cancel of finish notification
     virtual TAsyncFinishResult GetFinishFuture() = 0;
 
+    //! Returns future to get cancel of finish notification
+    virtual NThreading::TFuture<TDuration> GetReqTimeFuture() {
+        auto prom = NThreading::NewPromise<TDuration>();
+        prom.SetValue(TDuration::Zero());
+        return prom.GetFuture();
+    }
+
     //! Returns peer address
     virtual TString GetPeer() const = 0;
 
