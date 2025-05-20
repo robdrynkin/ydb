@@ -59,6 +59,7 @@ namespace NActors {
     void TEventOutputChannel::DropConfirmed(ui64 confirm) {
         LOG_DEBUG_IC_SESSION("ICOCH98", "Dropping confirmed messages");
         for (auto it = NotYetConfirmed.begin(); it != NotYetConfirmed.end() && it->Serial <= confirm; ) {
+            it->Span && it->Span.Event("Confirmed");
             Pool.Release(NotYetConfirmed, it++);
         }
     }
@@ -70,6 +71,7 @@ namespace NActors {
 
             switch (State) {
                 case EState::INITIAL:
+                    event.Span && event.Span.Event("FeedBuf:INITIAL", {});
                     event.InitChecksum();
                     if (event.Buffer) {
                         State = EState::BODY;
@@ -101,6 +103,7 @@ namespace NActors {
                     break;
 
                 case EState::BODY:
+                    event.Span && event.Span.Event("FeedBuf:BODY", {});
                     if (FeedPayload(task, event, weightConsumed)) {
                         State = EState::DESCRIPTOR;
                     } else {
@@ -109,10 +112,12 @@ namespace NActors {
                     break;
 
                 case EState::DESCRIPTOR:
+                    event.Span && event.Span.Event("FeedBuf:DESCRIPTOR", {});
                     if (!FeedDescriptor(task, event, weightConsumed)) {
                         return false;
                     }
                     event.Serial = serial;
+                    event.Span && event.Span.Event("FeedBuf:MoveToNotYetConfirmed", {});
                     NotYetConfirmed.splice(NotYetConfirmed.end(), Queue, Queue.begin()); // move event to not-yet-confirmed queue
                     SerializationInfoContainer = {};
                     SerializationInfo = nullptr;
@@ -120,6 +125,7 @@ namespace NActors {
                     return true; // we have processed whole event, signal to the caller
 
                 case EState::SECTIONS: {
+                    event.Span && event.Span.Event("FeedBuf:SECTIONS", {});
                     if (SectionIndex == 0) {
                         size_t totalSectionSize = 0;
                         for (const auto& section : SerializationInfo->Sections) {
