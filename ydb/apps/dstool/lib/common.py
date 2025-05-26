@@ -171,7 +171,7 @@ class ConnectionParams:
         if self.token is not None and len(self.token.split(' ')) == 2:
             self.token_type, self.token = self.token.split(' ')
         else:
-            self.token_type = 'OAuth'
+            self.token_type = 'Bearer'
 
     def apply_args(self, args, with_localhost=True):
         self.args = args
