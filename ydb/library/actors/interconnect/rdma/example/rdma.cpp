@@ -68,6 +68,17 @@ int TContext::InitQp() {
     return 0;
 }
 
+ibv_qp_state GetQpState(ibv_qp* qp) {
+    ibv_qp_attr qpAttr;
+    ibv_qp_init_attr qpInitAttr;
+    int ret = ibv_query_qp(qp, &qpAttr, IBV_QP_STATE, &qpInitAttr);
+    if (ret) {
+        Cerr << "ibv_query_qp failed: " << strerror(errno) << Endl;
+        return IBV_QPS_ERR;
+    }
+    return qpAttr.qp_state;
+}
+
 int TContext::MoveQpToRTS(ibv_gid_entry dstGidEntry, ui32 dstQpNum, ui32 dstLid) {
     if (!Qp) {
         Cerr << "QP is not initialized" << Endl;
@@ -85,6 +96,12 @@ int TContext::MoveQpToRTS(ibv_gid_entry dstGidEntry, ui32 dstQpNum, ui32 dstLid)
         int err = ibv_modify_qp(Qp, &qpAttr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
         if (err) {
             Cerr << "ibv_modify_qp failed: " << strerror(errno) << Endl;
+            return 1;
+        }
+
+        auto state = GetQpState(Qp);
+        if (state != IBV_QPS_INIT) {
+            Cerr << "QP state is not INIT after modification: " << (int)state << Endl;
             return 1;
         }
     }
@@ -118,6 +135,12 @@ int TContext::MoveQpToRTS(ibv_gid_entry dstGidEntry, ui32 dstQpNum, ui32 dstLid)
             Cerr << "ibv_modify_qp failed: " << strerror(errno) << Endl;
             return 1;
         }
+
+        auto state = GetQpState(Qp);
+        if (state != IBV_QPS_RTR) {
+            Cerr << "QP state is not RTR after modification: " << (int)state << Endl;
+            return 1;
+        }
     }
 
     Cout << "QP in RTR" << Endl;
@@ -135,6 +158,12 @@ int TContext::MoveQpToRTS(ibv_gid_entry dstGidEntry, ui32 dstQpNum, ui32 dstLid)
         int err = ibv_modify_qp(Qp, &qpAttr, IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC);
         if (err) {
             Cerr << "ibv_modify_qp failed: " << strerror(errno) << Endl;
+            return 1;
+        }
+
+        auto state = GetQpState(Qp);
+        if (state != IBV_QPS_RTS) {
+            Cerr << "QP state is not RTS after modification: " << (int)state << Endl;
             return 1;
         }
     }

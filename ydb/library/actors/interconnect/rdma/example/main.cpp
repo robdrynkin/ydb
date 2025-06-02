@@ -146,24 +146,25 @@ void clientLogic(int sockfd, TContext& ctx) {
 }
 
 int main(int argc, char *argv[]) {
-    int sockfd;
+    int sockfd = 0;
     bool isServer = false;
-    if (argc == 2) {
-        isServer = true;
-        sockfd = SockBind(atoi(argv[1]));
-        if (sockfd < 0) {
-            Cerr << "bind failed" << Endl;
-            return 1;
-        }
-    } else {
-        sockfd = SockConnect(argv[2], atoi(argv[1]));
-        if (sockfd < 0) {
-            Cerr << "connect failed" << Endl;
-            return 1;
-        }
-    }
+    Y_UNUSED(argc, argv);
+    // if (argc == 2) {
+    //     isServer = true;
+    //     sockfd = SockBind(atoi(argv[1]));
+    //     if (sockfd < 0) {
+    //         Cerr << "bind failed" << Endl;
+    //         return 1;
+    //     }
+    // } else {
+    //     sockfd = SockConnect(argv[2], atoi(argv[1]));
+    //     if (sockfd < 0) {
+    //         Cerr << "connect failed" << Endl;
+    //         return 1;
+    //     }
+    // }
 
-    auto [index, entry, rdmaCtx] = GetRdmaCtx(0);
+    auto [index, entry, rdmaCtx] = GetRdmaCtx(1);
     char str[INET6_ADDRSTRLEN];
     inet_ntop(AF_INET6, &(entry.gid), str, INET6_ADDRSTRLEN);
     fprintf(stderr, "%s\n", str);
@@ -171,7 +172,20 @@ int main(int argc, char *argv[]) {
     TContext ctx(entry, index, rdmaCtx, NInterconnect::NRdma::CreateDummyMemPool());
 
     ctx.InitQp();
-    auto [dstGidEntry, dstQpNum, dstLid] = ExchangeRdmaConnectionInfo(sockfd, entry, ctx.Qp->qp_num, ctx.PortAttr.lid);
+    // auto [dstGidEntry, dstQpNum, dstLid] = ExchangeRdmaConnectionInfo(sockfd, entry, ctx.Qp->qp_num, ctx.PortAttr.lid);
+    // for (ui32 i = 0; i < 16; ++i) {
+    //     Cerr << (int)dstGidEntry.gid.raw[i] << " ";
+    // }
+    // Cerr << Endl;
+    // Cerr << "dstQpNum: " << dstQpNum << ", dstLid: " << dstLid << Endl;
+    ibv_gid_entry dstGidEntry{
+        .gid = {
+            .raw = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 192, 168, 0, 16}
+        }
+    };
+    ui32 dstQpNum = 91;
+    ui32 dstLid = 0;
+
     ctx.MoveQpToRTS(dstGidEntry, dstQpNum, dstLid);
 
     if (isServer) {
