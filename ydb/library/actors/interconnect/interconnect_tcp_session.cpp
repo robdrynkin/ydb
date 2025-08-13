@@ -1128,6 +1128,23 @@ namespace NActors {
         TStringStream str;
         ev->Get()->Output(str);
 
+        TStringStream eventTypes;
+        ChannelScheduler->ForEach([&](TEventOutputChannel& channel) {
+            std::vector<std::pair<ui32, ui64>> eventCounts;
+            for (const auto& [type, count] : channel.EventTypeCounts) {
+                eventCounts.emplace_back(type, count);
+            }
+            std::sort(eventCounts.begin(), eventCounts.end(), [](const auto& a, const auto& b) {
+                return a.second > b.second;
+            });
+            eventTypes << "Channel: " << channel.ChannelId << "<br>\n";
+            for (ui32 i = 0; i < std::min(eventCounts.size(), 10ul); ++i) {
+                auto [type, count] = eventCounts[i];
+                eventTypes << "Event type: " << type << " count: " << count << "<br>\n";
+            }
+            eventTypes << "--------------------------------<br>\n";
+        });
+
         HTML(str) {
             DIV_CLASS("panel panel-info") {
                 DIV_CLASS("panel-heading") {
@@ -1191,6 +1208,10 @@ namespace NActors {
                             TABLER() {
                                 TABLED() { str << "AuthOnly CN"; }
                                 TABLED() { str << Params.AuthCN; }
+                            }
+                            TABLER() {
+                                TABLED() { str << "Event types"; }
+                                TABLED() { str << eventTypes.Str(); }
                             }
                             TABLER() {
                                 TABLED() {

@@ -53,6 +53,8 @@ namespace NActors {
         OutputQueueSize -= sizeof(TEventDescr2);
         Metrics->UpdateOutputChannelEvents(ChannelId);
 
+        EventTypeCounts[event.Descr.Type]++;
+
         return true;
     }
 

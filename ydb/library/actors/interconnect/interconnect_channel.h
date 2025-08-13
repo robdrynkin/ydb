@@ -139,6 +139,8 @@ namespace NActors {
         size_t SectionIndex = 0;
         std::vector<char> XdcData;
 
+        THashMap<ui32, ui64> EventTypeCounts;
+
         template<bool External>
         bool SerializeEvent(TTcpPacketOutTask& task, TEventHolder& event, size_t *bytesSerialized);
 
