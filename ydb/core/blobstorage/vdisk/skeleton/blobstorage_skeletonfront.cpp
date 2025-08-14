@@ -137,9 +137,9 @@ namespace NKikimr {
         using TWindowStatusOpt = TMaybe<TWindowStatus>;
         using TFeedback = TMyQueueBackpressure::TFeedback;
 
-        void SendWindowChange(const TActorContext &ctx, const TWindowStatus &wstatus, NKikimrBlobStorage::EVDiskQueueId queueId) {
-            ctx.Send(wstatus.ActorId, new TEvBlobStorage::TEvVWindowChange(queueId, wstatus));
-        }
+        // void SendWindowChange(const TActorContext &ctx, const TWindowStatus &wstatus, NKikimrBlobStorage::EVDiskQueueId queueId) {
+        //     ctx.Send(wstatus.ActorId, new TEvBlobStorage::TEvVWindowChange(queueId, wstatus));
+        // }
 
         ////////////////////////////////////////////////////////////////////////////
         // TIntQueueClass -- delayed queue
@@ -462,9 +462,11 @@ namespace NKikimr {
             ::NMonitoring::TDynamicCounters::TCounterPtr SkeletonFrontIncorrectMsgId;
 
             void NotifyOtherClients(const TActorContext &ctx, const TFeedback &feedback) {
-                for (const auto &x : feedback.second) {
-                    SendWindowChange(ctx, x, ExtQueueId);
-                }
+                Y_UNUSED(ctx);
+                Y_UNUSED(feedback);
+                // for (const auto &x : feedback.second) {
+                //     SendWindowChange(ctx, x, ExtQueueId);
+                // }
             }
 
             void OutputBadFeedback(const TFeedback &feedback) const {
