@@ -108,8 +108,8 @@ namespace NKikimr {
         WindowMinLowWatermarkPercent = 2;                           // 2%
         WindowMaxLowWatermarkPercent = 50;                          // 50%
         WindowPercentThreshold = 5;                                 // 5%
-        WindowCostChangeUntilFrozenPercent = 20;                    // 20%
-        WindowCostChangeUntilDeathPercent = 33;                     // 33%
+        WindowCostChangeUntilFrozenPercent = 200;                   // 200%
+        WindowCostChangeUntilDeathPercent = 250;                    // 250%
         WindowTimeout = TDuration::Minutes(60);                     // 1 hour
 
         MaxResponseSize = ui32(8) << ui32(20);                      // 8 MB

@@ -93,6 +93,7 @@ namespace NKikimr {
             // TWindow
             ////////////////////////////////////////////////////////////////////////////
             class TWindow : public TThrRefBase {
+                friend class TQueueBackpressure;
                 TStatPtr GlobalStatPtr;
             public:
                 const TClientId ClientId;
@@ -105,11 +106,11 @@ namespace NKikimr {
                 ui64 LastMaxWindowSize;
                 ui64 CostChangeUntilFrozenCountdown;
                 ui64 CostChangeUntilDeathCountdown;
-                const ui64 PercentThreshold;
-                const ui64 DefLowWatermark;
-                const ui64 DefHighWatermark;
-                const ui64 CostChangeUntilFrozen;  // how much cost change we should skip to move from Fading to Frozen
-                const ui64 CostChangeUntilDeath;   // how much cost change we should skip to remove window completely
+                const ui64 PercentThreshold; // 5%
+                const ui64 DefLowWatermark; // 6000000 = 2%
+                const ui64 DefHighWatermark; // 150000000 = 50%
+                const ui64 CostChangeUntilFrozen;  // how much cost change we should skip to move from Fading to Frozen // 60000000
+                const ui64 CostChangeUntilDeath;   // how much cost change we should skip to remove window completely // 99000000
                 TInstant LastActivityTime;
                 TDuration WindowTimeout;
                 ui64 InFlight;
@@ -209,6 +210,9 @@ namespace NKikimr {
                     // definitely notify client if it goes to receive rejects
                     bool notify = highWatermark < LowWatermark;
 
+                    // ui64 oldLowWatermark = LowWatermark;
+                    // ui64 oldHighWatermark = HighWatermark;
+
                     LowWatermark = lowWatermark;
                     HighWatermark = highWatermark;
 
@@ -220,6 +224,11 @@ namespace NKikimr {
                         Y_ABORT_UNLESS(LowWatermark != 0);
                         notify = (diff * 100u / LowWatermark >= PercentThreshold);
                     }
+
+                    // if (notify) {
+                    //     Cerr << "AdjustWindow notify" << oldLowWatermark << " " << oldHighWatermark << " "
+                    //         << LowWatermark << " " << HighWatermark << " " << LastMaxWindowSize << " " << PercentThreshold << Endl;
+                    // }
 
                     SetStatus(opStatus, NKikimrBlobStorage::TWindowFeedback::WindowUpdate, notify);
                     GlobalStatPtr->IncWindowUpdate();
@@ -292,6 +301,7 @@ namespace NKikimr {
             TVector<TWindowStatus> OtherWindowsStatusVecCache;
             TStatPtr GlobalStatPtr;
             TDuration WindowTimeout;
+            ui64 QueueId;
 
 
             void ClearRecalculateCache() {
@@ -362,13 +372,31 @@ namespace NKikimr {
                     lowWatermark = Max(lowWatermark, MinLowWatermark);
                     lowWatermark = Min(lowWatermark, MaxLowWatermark);
 
+                    // TStringBuilder sb;
+                    // sb << "AdjustWindow: " << actualCostChange << " " << AllWindows.size() << " " << activeWindowsNum << " " << totalCost << " " << MaxCost << " "
+                    //     << lowWatermark << ": ";
+                    // auto stateStr = [](EWindowState state) {
+                    //     switch (state) {
+                    //         case EWindowState::Active: return "Active";
+                    //         case EWindowState::Fading: return "Fading";
+                    //         case EWindowState::Frozen: return "Frozen";
+                    //         case EWindowState::Dead: return "Dead";
+                    //         default: return "Unknown";
+                    //     }
+                    // };
+
                     // adjust active windows
                     for (auto &a : ActiveWindowsCache) {
                         // calculate high watermark as weighted fraction of MaxCost
                         ui64 highWatermark = ui64(MaxCost) * ui64(a->GetCost()) / totalCost;
                         highWatermark = Max(highWatermark, lowWatermark); // highWatermark can be 0 for fading windows
                         // adjust window
+                        // ui64 oldLowWatermark = a->LowWatermark;
+                        // ui64 oldHighWatermark = a->HighWatermark;
                         TWindowStatus *update = a->AdjustWindow(lowWatermark, highWatermark, &RecalculateStatusCache);
+                        // sb << "(" << update->Notify << " " << a->ClientId.GetIdentifier() << " " << oldLowWatermark << " " << oldHighWatermark << " "
+                        //     << a->LowWatermark << " " << a->HighWatermark << " " << a->LastMaxWindowSize << " "
+                        //     << stateStr(a->GetState(now)) << " " << a->GetCost() << " " << a->CostChangeUntilFrozenCountdown << " " << a->CostChangeUntilDeathCountdown << " " << a->InFlight << "), ";
                         if (update->Notify) {
                             if (a->ActorId == actorId) {
                                 StatusCache.WindowUpdate(*update);
@@ -377,6 +405,9 @@ namespace NKikimr {
                             }
                         }
                     }
+                    // if (QueueId % 30 == 0) {
+                    //     Cerr << "QueueId# " << QueueId << ": " << sb << Endl;
+                    // }
                 }
             }
 
@@ -401,6 +432,7 @@ namespace NKikimr {
                 , OtherWindowsStatusVecCache()
                 , GlobalStatPtr(new TStat())
                 , WindowTimeout(windowTimeout)
+                , QueueId(RandomNumber<ui64>())
             {}
 
             std::optional<TMessageId> GetExpectedMsgId(const TActorId& actorId) const {
