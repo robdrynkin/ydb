@@ -431,7 +431,7 @@ class TBoardLookupActor : public TActorBootstrapped<TBoardLookupActor> {
         if (!fromReconnect) {
             auto delay = TDuration::Seconds(1);
             delay *= AppData()->RandomProvider->Uniform(10, 200);
-            delay /= 100;
+            // delay /= 100;
             replica.IsScheduled = true;
             Schedule(delay, new TEvPrivate::TEvReconnectReplicas(replicaIdx));
             return;
