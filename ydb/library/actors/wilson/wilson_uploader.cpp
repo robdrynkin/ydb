@@ -53,6 +53,9 @@ namespace NWilson {
                 auto *serviceNameAttr = rspan->mutable_resource()->add_attributes();
                 serviceNameAttr->set_key("service.name");
                 serviceNameAttr->mutable_value()->set_string_value(std::move(serviceName));
+                auto *podUidAttr = rspan->mutable_resource()->add_attributes();
+                podUidAttr->set_key("k8s.pod.uid");
+                podUidAttr->mutable_value()->set_string_value(getenv("POD_UID"));
                 ScopeSpans = rspan->add_scope_spans();
             }
 
