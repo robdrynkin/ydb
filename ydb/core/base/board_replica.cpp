@@ -46,6 +46,94 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
     THashMap<TActorId, TSubscriber> Subscribers;
     TMap<TString, TPathSubscribeData> PathToSubscribers;
 
+    enum EUpdateReason {
+        Publish,
+        Cleanup,
+        Undelivered,
+        Disconnect
+    };
+    TString UpdateReasonToString(EUpdateReason reason) {
+        switch (reason) {
+            case Publish:
+                return "Publish";
+            case Cleanup:
+                return "Cleanup";
+            case Undelivered:
+                return "Undelivered";
+            case Disconnect:
+                return "Disconnect";
+            default:
+                return "Unknown";
+        }
+    }
+    THashMap<std::pair<ui32, EUpdateReason>, ui64> UpdateSubscribersCounters;
+    THashMap<ui32, std::pair<ui64, ui64>> LookupCounters;
+    enum class CleanUpReason {
+        Undelivered,
+        DisconnectSession,
+        Unsubscribe
+    };
+    THashMap<CleanUpReason, ui64> CleanUpCounters;
+
+    TString PrintUpdateSubscribersCounters() {
+        TStringBuilder sb;
+
+        TVector<std::pair<std::pair<ui32, EUpdateReason>, ui64>> counters(UpdateSubscribersCounters.begin(), UpdateSubscribersCounters.end());
+        std::sort(counters.begin(), counters.end(), [](const auto& a, const auto& b) {
+            return a.second > b.second;
+        });
+
+
+        THashMap<EUpdateReason, ui64> totalCounters;
+        for (const auto& [counter, count] : counters) {
+            totalCounters[counter.second] += count;
+        }
+        sb << "Total: ";
+        for (const auto& [reason, count] : totalCounters) {
+            sb << UpdateReasonToString(reason) << " " << count << "; ";
+        }
+
+        const size_t topk = 50;
+        counters.resize(std::min(topk, counters.size()));
+        sb << "By nodes: ";
+        for (const auto& [counter, count] : counters) {
+            sb << counter.first << " " << UpdateReasonToString(counter.second) << " " << count << "; ";
+        }
+        return sb;
+    }
+
+    TString PrintLookupCounters() {
+        TStringBuilder sb;
+        TVector<std::pair<ui32, std::pair<ui64, ui64>>> counters(LookupCounters.begin(), LookupCounters.end());
+        std::sort(counters.begin(), counters.end(), [](const auto& a, const auto& b) {
+            return a.second.second > b.second.second;
+        });
+        const size_t topk = 50;
+        counters.resize(std::min(topk, counters.size()));
+        sb << "By nodes: ";
+        for (const auto& [node, cntr] : counters) {
+            sb << node << " " << cntr.first << " " << cntr.second << "; ";
+        }
+        return sb;
+    }
+
+    TString PrintCleanUpCounters() {
+        TStringBuilder sb;
+        for (const auto& [reason, count] : CleanUpCounters) {
+            sb << CleanUpReasonToString(reason) << " " << count << "; ";
+        }
+        return sb;
+    }
+    TString CleanUpReasonToString(CleanUpReason reason) {
+        switch (reason) {
+            case CleanUpReason::Undelivered:
+                return "Undelivered";
+            case CleanUpReason::DisconnectSession:
+                return "DisconnectSession";
+            case CleanUpReason::Unsubscribe:
+                return "Unsubscribe";
+        }
+    }
     struct TSessionSubscribers {
         THashSet<TActorId> Subscribers;
         THashSet<TActorId> Publishers;
@@ -103,6 +191,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
             Y_DEBUG_ABORT_UNLESS(entry.Owner == ActorIdFromProto(record.GetOwner()));
 
             if (pathSubscribeDataIt != PathToSubscribers.end()) {
+                UpdateSubscribersCounters[std::make_pair(owner.NodeId(), Publish)]++;
                 SendUpdateToSubscribers(entry, false);
             }
 
@@ -123,6 +212,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
             entry.PathIt->second.emplace(entryIndex);
 
             if (pathSubscribeDataIt != PathToSubscribers.end()) {
+                UpdateSubscribersCounters[std::make_pair(owner.NodeId(), Publish)]++;
                 SendUpdateToSubscribers(entry, false);
             }
         }
@@ -244,6 +334,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
         const auto& path = entry.PathIt->first;
         auto pathSubscribeDataIt = PathToSubscribers.find(path);
         if (pathSubscribeDataIt != PathToSubscribers.end()) {
+            UpdateSubscribersCounters[std::make_pair(ev->Sender.NodeId(), Cleanup)]++;
             SendUpdateToSubscribers(entry, true);
         }
 
@@ -253,6 +344,8 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
     void Handle(TEvStateStorage::TEvReplicaBoardLookup::TPtr &ev) {
         auto &record = ev->Get()->Record;
         const auto &path = record.GetPath();
+        auto& cntr = LookupCounters[ev->Sender.NodeId()];
+        cntr.first++;
 
         ui32 flags = 0;
         if (record.GetSubscribe()) {
@@ -278,6 +371,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
         auto pathIt = IndexPath.find(path);
         if (pathIt == IndexPath.end()) {
             reply = std::make_unique<TEvStateStorage::TEvReplicaBoardInfo>(path, true);
+            cntr.second++;
         } else {
             reply = std::make_unique<TEvStateStorage::TEvReplicaBoardInfo>(path, false);
             auto *info = reply->Record.MutableInfo();
@@ -288,6 +382,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
                 ActorIdToProto(entry.Owner, ex->MutableOwner());
                 ex->SetPayload(entry.Payload);
             }
+            cntr.second += pathIt->second.size();
         }
 
         auto resp = std::make_unique<IEventHandle>(
@@ -314,6 +409,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
                     return;
                 }
                 CleanupSubscriber(ev->Sender, ev->InterconnectSession);
+                CleanUpCounters[CleanUpReason::Undelivered]++;
                 break;
             }
             case TEvStateStorage::TEvReplicaBoardPublishAck::EventType: {
@@ -328,6 +424,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
                 const auto& path = entry.PathIt->first;
                 auto pathSubscribeDataIt = PathToSubscribers.find(path);
                 if (pathSubscribeDataIt != PathToSubscribers.end()) {
+                    UpdateSubscribersCounters[std::make_pair(ev->Sender.NodeId(), Undelivered)]++;
                     SendUpdateToSubscribers(entry, true);
                 }
 
@@ -373,6 +470,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
         const auto& sender = ev->Sender;
 
         CleanupSubscriber(sender, ev->InterconnectSession);
+        CleanUpCounters[CleanUpReason::Unsubscribe]++;
     }
 
     void DisconnectSession(const TActorId& session) {
@@ -388,6 +486,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
             }
             if (subscribersIt->second.Session == session) {
                 CleanupSubscriber(subscriber, TActorId());
+                CleanUpCounters[CleanUpReason::DisconnectSession]++;
             }
         }
 
@@ -405,6 +504,7 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
             const auto& path = entry.PathIt->first;
             auto pathSubscribeDataIt = PathToSubscribers.find(path);
             if (pathSubscribeDataIt != PathToSubscribers.end()) {
+                UpdateSubscribersCounters[std::make_pair(session.NodeId(), Disconnect)]++;
                 SendUpdateToSubscribers(entry, true);
             }
 
@@ -412,6 +512,15 @@ class TBoardReplicaActor : public TActorBootstrapped<TBoardReplicaActor> {
         }
 
         Sessions.erase(sessionsIt);
+    }
+
+    void LogUpdateSubscribersCounters() {
+        TStringBuilder sb;
+        for (const auto& [path, subscribers] : PathToSubscribers) {
+            sb << path << " " << subscribers.Subscribers.size() << "; ";
+        }
+        BLOG_I("PathToSubscribers: " << sb << ", UpdateSubscribersCounters: " << PrintUpdateSubscribersCounters() << ", LookupCounters: " << PrintLookupCounters() << ", CleanUpCounters: " << PrintCleanUpCounters());
+        Schedule(TDuration::Seconds(3), new TEvents::TEvWakeup());
     }
 
 public:
@@ -427,6 +536,7 @@ public:
         auto whiteboardId = NNodeWhiteboard::MakeNodeWhiteboardServiceId(localNodeId);
         Send(whiteboardId, new NNodeWhiteboard::TEvWhiteboard::TEvSystemStateAddRole("StateStorageBoard"));
         Become(&TThis::StateWork);
+        Schedule(TDuration::Seconds(3), new TEvents::TEvWakeup());
     }
 
     STATEFN(StateWork) {
@@ -438,6 +548,7 @@ public:
             cFunc(TEvents::TEvPoison::EventType, PassAway);
             hFunc(TEvInterconnect::TEvNodeDisconnected, Handle);
             hFunc(TEvStateStorage::TEvReplicaBoardUnsubscribe, Handle);
+            cFunc(TEvents::TEvWakeup::EventType, LogUpdateSubscribersCounters);
 
             IgnoreFunc(TEvInterconnect::TEvNodeConnected);
         default:

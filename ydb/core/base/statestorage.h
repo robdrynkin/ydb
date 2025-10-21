@@ -528,8 +528,8 @@ enum class EBoardLookupMode {
 };
 
 struct TBoardRetrySettings {
-    TDuration StartDelayMs = TDuration::MilliSeconds(2000);
-    TDuration MaxDelayMs = TDuration::MilliSeconds(5000);
+    TDuration StartDelayMs = TDuration::MilliSeconds(5000);
+    TDuration MaxDelayMs = TDuration::MilliSeconds(50000);
 };
 
 TIntrusivePtr<TStateStorageInfo> BuildStateStorageInfo(char (&namePrefix)[TActorId::MaxServiceIDLength], const NKikimrConfig::TDomainsConfig::TStateStorage& config);

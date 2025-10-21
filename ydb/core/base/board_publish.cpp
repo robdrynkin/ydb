@@ -224,7 +224,7 @@ class TBoardPublishActor : public TActorBootstrapped<TBoardPublishActor> {
 
     void RetryReplica(const TActorId& replica, bool fromRetry = false) {
         if (!fromRetry) {
-            auto delay = TDuration::Seconds(2);
+            auto delay = TDuration::Seconds(20);
             delay *= AppData()->RandomProvider->Uniform(50, 200);
             delay /= 100;
             Schedule(delay, new TEvPrivate::TEvRetryPublishActor(replica));
