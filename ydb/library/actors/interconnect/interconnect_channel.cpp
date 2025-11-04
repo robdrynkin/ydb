@@ -69,9 +69,9 @@ namespace NActors {
 
             switch (State) {
                 case EState::INITIAL:
+                    event.Span && event.Span.Event("FeedBuf:INITIAL");
                     event.InitChecksum();
                     task.UpdateIcQueueDuration(event);
-                    event.Span && event.Span.Event("FeedBuf:INITIAL");
                     if (event.Buffer) {
                         State = EState::BODY;
                         Iter = event.Buffer->GetBeginIter();
@@ -102,15 +102,19 @@ namespace NActors {
                     break;
 
                 case EState::BODY:
+                    event.Span && event.Span.Event("FeedBuf:BODY");
                     if (FeedPayload(task, event)) {
                         State = EState::DESCRIPTOR;
                     } else {
+                        event.Span && event.Span.Event("FeedBuf:BODY:Yield");
                         return false;
                     }
                     break;
 
                 case EState::DESCRIPTOR:
+                    event.Span && event.Span.Event("FeedBuf:DESCRIPTOR");
                     if (!FeedDescriptor(task, event)) {
+                        event.Span && event.Span.Event("FeedBuf:DESCRIPTOR:Yield");
                         return false;
                     }
                     event.Serial = serial;
@@ -121,6 +125,7 @@ namespace NActors {
                     return true; // we have processed whole event, signal to the caller
 
                 case EState::SECTIONS: {
+                    event.Span && event.Span.Event("FeedBuf:SECTIONS");
                     if (SectionIndex == 0) {
                         size_t totalSectionSize = 0;
                         for (const auto& section : SerializationInfo->Sections) {
@@ -156,6 +161,7 @@ namespace NActors {
                     }
 
                     if (XdcData.empty()) {
+                        event.Span && event.Span.Event("FeedBuf:SECTIONS:Yield");
                         return false;
                     }
 
