@@ -113,6 +113,15 @@ namespace NActors {
         const ui32 recpNodeId = recipient.NodeId();
 
         if (recpNodeId != NodeId && recpNodeId != 0) {
+
+            static thread_local std::unordered_map<ui32, std::unordered_set<TString>> RecpToMsgTypes;
+
+            auto& s = RecpToMsgTypes[recpNodeId];
+            if (!s.contains(ev->GetTypeName())) {
+                Cerr << "New message type " << ev->GetTypeName() << " from " << ev->Sender.ToString() << " to " << recipient.ToString() << Endl;
+                s.insert(ev->GetTypeName());
+            }
+
             // if recipient is not local one - rewrite with forward instruction
             Y_DEBUG_ABORT_UNLESS(!ev->HasEvent() || ev->GetBase()->IsSerializable());
             Y_ABORT_UNLESS(ev->Recipient == recipient,

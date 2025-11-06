@@ -501,6 +501,7 @@ namespace NActors {
     }
 
     void TInterconnectSessionTCP::ReestablishConnectionWithHandshake(TDisconnectReason reason) {
+        Cerr << "ReestablishConnectionWithHandshake" << Endl;
         ReestablishConnection({}, true, std::move(reason));
     }
 
@@ -519,7 +520,9 @@ namespace NActors {
 
     void TInterconnectSessionTCP::OnDisconnect(TEvSocketDisconnect::TPtr& ev) {
         if (ev->Sender == ReceiverId) {
+            Cerr << "OnDisconnect" << Endl;
             if (ev->Get()->Reason == TDisconnectReason::EndOfStream() && !NumEventsInQueue && OutputCounter == LastConfirmed) {
+                Cerr << "Terminate" << Endl;
                 return Terminate(ev->Get()->Reason);
             }
 
@@ -527,11 +530,13 @@ namespace NActors {
             LOG_INFO_IC_SESSION("ICS07", "socket disconnect %" PRIi64 " reason# %s", Socket ? i64(*Socket) : -1, ev->Get()->Reason.ToString().data());
             ReceiverId = TActorId(); // reset receiver actor id as we have no more receiver yet
             if (wasConnected) {
+                Cerr << "wasConnected" << Endl;
                 // we were sucessfully connected and did not expect failure, so it arrived from the input side; we should
                 // restart handshake process, closing our part of socket first
                 ShutdownSocket(ev->Get()->Reason);
                 StartHandshake();
             } else {
+                Cerr << "ReestablishConnectionExecute" << Endl;
                 ReestablishConnectionExecute();
             }
         }
