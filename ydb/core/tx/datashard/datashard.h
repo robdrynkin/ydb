@@ -928,6 +928,10 @@ namespace TEvDataShard {
                 || Record.GetStatus() == NKikimrTxDataShard::TError::SCHEME_CHANGED // Ydb::StatusIds::GENERIC_ERROR
             ;
         }
+
+        bool IsSchemaError() const {
+            return Record.GetStatus() == NKikimrTxDataShard::TError::SCHEME_CHANGED || Record.GetStatus() == NKikimrTxDataShard::TError::SCHEME_ERROR;
+        }
     };
 
     struct TEvOverloadReady

@@ -138,6 +138,7 @@ private:
     TInstant StartTime;
     std::optional<TInstant> StartCommitTime;
     TActorId TimeoutTimerActorId;
+    bool SchemaSyncVersion = false;
 
     TAutoPtr<NSchemeCache::TSchemeCacheRequest> ResolvePartitionsResult;
     std::shared_ptr<NSchemeCache::TSchemeCacheNavigate> ResolveNamesResult;
@@ -213,6 +214,7 @@ public:
     explicit TUploadRowsBase(std::shared_ptr<const TVector<std::pair<TSerializedCellVec, TString>>> rows,
                              TDuration timeout = TDuration::Max(),
                              bool diskQuotaExceeded = false,
+                             bool retry = false,
                              NWilson::TSpan span = {})
         : TBase()
         , SchemeCache(MakeSchemeCacheID())
@@ -222,6 +224,7 @@ public:
         , UploadCountersGuard(UploadCounters.BuildGuard(TMonotonic::Now()))
         , DiskQuotaExceeded(diskQuotaExceeded)
         , Rows(std::move(rows))
+        , SchemaSyncVersion(retry)
         , Span(std::move(span))
     {}
 
@@ -279,6 +282,8 @@ private:
     virtual void OnBeforePoison(const TActorContext&) {
         // nothing by default
     }
+
+    virtual void Retry(const TActorContext&) = 0;
 
     virtual const TString& GetDatabase() const = 0;
     virtual const TString& GetTable() const = 0;
@@ -633,7 +638,7 @@ private:
                 Ydb::StatusIds::SCHEME_ERROR, TStringBuilder() << "Bulk upsert. Invalid table path specified: '" << table << "'", ctx);
         }
         entry.Operation = NSchemeCache::TSchemeCacheNavigate::OpTable;
-        entry.SyncVersion = true;
+        entry.SyncVersion = SchemaSyncVersion;
         entry.ShowPrivatePath = AllowWriteToPrivateTable;
         request->ResultSet.emplace_back(entry);
         ctx.Send(SchemeCache, new TEvTxProxySchemeCache::TEvNavigateKeySet(request), 0, 0, Span.GetTraceId());
@@ -684,7 +689,7 @@ private:
         const NSchemeCache::TSchemeCacheNavigate::TEntry& entry = request.ResultSet.front();
 
         if (entry.Status != NSchemeCache::TSchemeCacheNavigate::EStatus::Ok) {
-            return ReplyWithError(entry.Status, ctx);
+            return SyncSchemaOrReplyWithError(entry.Status, ctx);
         }
 
         TableKind = entry.Kind;
@@ -711,14 +716,14 @@ private:
 
         TString errorMessage;
         if (!ValidateTable(errorMessage)) {
-            return ReplyWithError(Ydb::StatusIds::SCHEME_ERROR, errorMessage, ctx);
+            return SyncSchemaOrReplyWithError(Ydb::StatusIds::SCHEME_ERROR, errorMessage, ctx);
         }
 
         bool makeYdbSchema = isColumnTable || (GetSourceType() != EUploadSource::ProtoValues);
         {
             auto conclusion = BuildSchema(ctx, makeYdbSchema, isColumnTable);
             if (conclusion.IsFail()) {
-                return ReplyWithError(Ydb::StatusIds::SCHEME_ERROR, conclusion.GetErrorMessage(), ctx);
+                return SyncSchemaOrReplyWithError(Ydb::StatusIds::SCHEME_ERROR, conclusion.GetErrorMessage(), ctx);
             }
         }
 
@@ -726,13 +731,13 @@ private:
             case EUploadSource::ProtoValues:
             {
                 if (!ExtractRows(errorMessage)) {
-                    return ReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
+                    return SyncSchemaOrReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
                 }
 
                 if (isColumnTable) {
                     // TUploadRowsRPCPublic::ExtractBatch() - converted JsonDocument, DynNumbers, ...
                     if (!ExtractBatch(errorMessage)) {
-                        return ReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
+                        return SyncSchemaOrReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
                     }
                 }
                 break;
@@ -743,12 +748,12 @@ private:
                 if (isColumnTable) {
                     // TUploadColumnsRPCPublic::ExtractBatch() - NOT converted JsonDocument, DynNumbers, ...
                     if (!ExtractBatch(errorMessage)) {
-                        return ReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
+                        return SyncSchemaOrReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
                     }
                     if (!ColumnsToConvertInplace.empty()) {
                         auto convertResult = NArrow::InplaceConvertColumns(Batch, ColumnsToConvertInplace);
                         if (!convertResult.ok()) {
-                            return ReplyWithError(Ydb::StatusIds::BAD_REQUEST,
+                            return SyncSchemaOrReplyWithError(Ydb::StatusIds::BAD_REQUEST,
                                 TStringBuilder() << "Cannot convert arrow batch inplace:" << convertResult.status().ToString(), ctx);
                         }
                         Batch = *convertResult;
@@ -757,7 +762,7 @@ private:
                     if (!ColumnsToConvert.empty()) {
                         auto convertResult = NArrow::ConvertColumns(Batch, ColumnsToConvert, IsInfinityInJsonAllowed());
                         if (!convertResult.ok()) {
-                            return ReplyWithError(Ydb::StatusIds::BAD_REQUEST,
+                            return SyncSchemaOrReplyWithError(Ydb::StatusIds::BAD_REQUEST,
                                 TStringBuilder() << "Cannot convert arrow batch:" << convertResult.status().ToString(), ctx);
                         }
                         Batch = *convertResult;
@@ -765,11 +770,11 @@ private:
                 } else {
                     // TUploadColumnsRPCPublic::ExtractBatch() - NOT converted JsonDocument, DynNumbers, ...
                     if (!ExtractBatch(errorMessage)) {
-                        return ReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
+                        return SyncSchemaOrReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
                     }
                     // Implicit types conversion inside ExtractRows(), in TArrowToYdbConverter
                     if (!ExtractRows(errorMessage)) {
-                        return ReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
+                        return SyncSchemaOrReplyWithError(Ydb::StatusIds::BAD_REQUEST, errorMessage, ctx);
                     }
                 }
 
@@ -802,7 +807,7 @@ private:
             // Batch is already converted
             WriteToColumnTable(ctx);
         } else {
-            return ReplyWithError(Ydb::StatusIds::SCHEME_ERROR, "is not supported", ctx);
+            return SyncSchemaOrReplyWithError(Ydb::StatusIds::SCHEME_ERROR, "is not supported", ctx);
         }
     }
 
@@ -813,7 +818,7 @@ private:
             return ReplyWithError(Ydb::StatusIds::UNAUTHORIZED, accessCheckError, ctx);
         }
         if (IsIndexImplTable && !AllowWriteToIndexImplTable) {
-            return ReplyWithError(
+            return SyncSchemaOrReplyWithError(
                 Ydb::StatusIds::BAD_REQUEST,
                 "Writing to index implementation tables is not allowed.",
                 ctx);
@@ -1289,6 +1294,10 @@ private:
                 }
             }
 
+            if (ev->Get()->IsSchemaError()) {
+                return SyncSchemaOrReplyWithError(TUploadStatus(Ydb::StatusIds::SCHEME_ERROR, shardResponse.GetErrorDescription()), ctx);
+            }
+
             if (!ev->Get()->IsRetriableError() || !Backoff.HasMore()) {
                 return ReplyWithError(
                     TUploadStatus(static_cast<NKikimrTxDataShard::TError::EKind>(shardResponse.GetStatus()),
@@ -1397,6 +1406,21 @@ private:
         LOG_NOTICE_S(ctx, NKikimrServices::RPC_REQUEST, LogPrefix() << status.GetErrorMessage());
         RaiseIssue(NYql::TIssue(LogPrefix() << status.GetErrorMessage()));
         ReplyWithResult(status, ctx);
+    }
+
+    void SyncSchemaOrReplyWithError(const Ydb::StatusIds::StatusCode code, const TString& errorMessage, const TActorContext& ctx) {
+        return SyncSchemaOrReplyWithError(TUploadStatus(code, errorMessage), ctx);
+    }
+
+    void SyncSchemaOrReplyWithError(const TUploadStatus& status, const TActorContext& ctx) {
+        if (!SchemaSyncVersion) {
+            // We might have an error due to stale schema, so we need to sync schema and retry
+            LOG_NOTICE_S(ctx, NKikimrServices::RPC_REQUEST, LogPrefix() << "Schema error: " << status.GetErrorMessage() << ", retrying...");
+            Retry(ctx);
+            Die(ctx);
+            return;
+        }
+        return ReplyWithError(status, ctx);
     }
 
     void ReplyWithResult(const TUploadStatus& status, const TActorContext& ctx) {
