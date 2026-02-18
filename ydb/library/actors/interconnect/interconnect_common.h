@@ -35,6 +35,7 @@ namespace NActors {
         ui64 OutputBuffersTotalSizeLimitInMB = 0;
         ui32 TotalInflightAmountOfData = 0;
         bool MergePerPeerCounters = false;
+        bool MergePerHostCounters = false;
         bool MergePerDataCenterCounters = false;
         ui32 TCPSocketBufferSize = 0;
         TDuration PingPeriod = TDuration::Seconds(3);
@@ -126,6 +127,7 @@ namespace NActors {
         TString Cookie; // unique random identifier of a node instance (generated randomly at every start)
         std::unordered_map<ui16, TString> ChannelName;
         std::optional<ui32> OutgoingHandshakeInflightLimit;
+        TActorId HostMetricsAggregatorId;
 
         struct TVersionInfo {
             TString Tag; // version tag for this node
