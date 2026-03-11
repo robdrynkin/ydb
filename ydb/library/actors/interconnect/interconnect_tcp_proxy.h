@@ -189,6 +189,7 @@ namespace NActors {
 
         const char* State = nullptr;
         TInstant StateSwitchTime;
+        bool InErrorState = false;
 
         template <typename... TArgs>
         void SwitchToState(int line, const char* name, TArgs&&... args) {
@@ -208,6 +209,11 @@ namespace NActors {
                         {}, nullptr, 0));
                     PassAwayScheduled = true;
                 }
+            }
+            if (CurrentStateFunc() == &TThis::HoldByError) {
+                InErrorState = true;
+            } else if (CurrentStateFunc() == &TThis::StateWork || CurrentStateFunc() == &TThis::PendingActivation) {
+                InErrorState = false;
             }
         }
 
