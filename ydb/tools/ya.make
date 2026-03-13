@@ -5,7 +5,10 @@ RECURSE(
     query_replay_yt
     simple_queue
     olap_workload
+    memcpy_memset_bench
+    memory_no_ydb_repro
     tsserver
     tstool
+    xxh3_update_bench
     ydbd_slice
 )

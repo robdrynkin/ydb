@@ -1,0 +1,1165 @@
+{
+  "duration_sec": 5,
+  "hosts": [
+    "node-1302.ydb-dev.ik8s.nebiuscloud.net",
+    "node-1306.ydb-dev.ik8s.nebiuscloud.net",
+    "node-1308.ydb-dev.ik8s.nebiuscloud.net"
+  ],
+  "scenarios": [
+    {
+      "bench_aggregate_payload_gbps_sum": 71.2942403,
+      "bench_aggregate_traffic_gbps_sum": 213.8827209,
+      "bench_results": [
+        {
+          "calls": 87149631,
+          "cycles_per_call": 13198.56153,
+          "cycles_per_traffic_byte": 1.074101687,
+          "payload_bytes": 356964888576,
+          "payload_gb_per_sec": 71.2942403,
+          "seconds": 5.006924642,
+          "threads": 96,
+          "traffic_bytes": 1070894665728,
+          "traffic_gb_per_sec": 213.8827209
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1306.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "local_numa0",
+      "uprof": {
+        "local_read_bw_gbps": 191.94,
+        "local_write_bw_gbps": 123.95,
+        "remote_pct": 0.07275948245863781,
+        "remote_read_bw_gbps": 0.2,
+        "remote_write_bw_gbps": 0.03,
+        "total_bw_gbps": 316.11
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 71.24720559,
+      "bench_aggregate_traffic_gbps_sum": 213.7416168,
+      "bench_results": [
+        {
+          "calls": 87105867,
+          "cycles_per_call": 13205.13701,
+          "cycles_per_traffic_byte": 1.074636801,
+          "payload_bytes": 356785631232,
+          "payload_gb_per_sec": 71.24720559,
+          "seconds": 5.007714033,
+          "threads": 96,
+          "traffic_bytes": 1070356893696,
+          "traffic_gb_per_sec": 213.7416168
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1302.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "local_numa0",
+      "uprof": {
+        "local_read_bw_gbps": 189.76,
+        "local_write_bw_gbps": 123.62,
+        "remote_pct": 0.07971430393469804,
+        "remote_read_bw_gbps": 0.23,
+        "remote_write_bw_gbps": 0.02,
+        "total_bw_gbps": 313.62
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 71.55779155,
+      "bench_aggregate_traffic_gbps_sum": 214.6733747,
+      "bench_results": [
+        {
+          "calls": 87466054,
+          "cycles_per_call": 13150.8186,
+          "cycles_per_traffic_byte": 1.070216357,
+          "payload_bytes": 358260957184,
+          "payload_gb_per_sec": 71.55779155,
+          "seconds": 5.006596059,
+          "threads": 96,
+          "traffic_bytes": 1074782871552,
+          "traffic_gb_per_sec": 214.6733747
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1308.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "local_numa0",
+      "uprof": {
+        "local_read_bw_gbps": 190.92,
+        "local_write_bw_gbps": 124.36,
+        "remote_pct": 0.088728332858003,
+        "remote_read_bw_gbps": 0.27,
+        "remote_write_bw_gbps": 0.01,
+        "total_bw_gbps": 315.57
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 71.2960029,
+      "bench_aggregate_traffic_gbps_sum": 213.8880087,
+      "bench_results": [
+        {
+          "calls": 87134207,
+          "cycles_per_call": 13200.84161,
+          "cycles_per_traffic_byte": 1.07428724,
+          "payload_bytes": 356901711872,
+          "payload_gb_per_sec": 71.2960029,
+          "seconds": 5.005914741,
+          "threads": 96,
+          "traffic_bytes": 1070705135616,
+          "traffic_gb_per_sec": 213.8880087
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1302.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "local_numa1",
+      "uprof": {
+        "local_read_bw_gbps": 186.84,
+        "local_write_bw_gbps": 124.17,
+        "remote_pct": 0.06426735218508997,
+        "remote_read_bw_gbps": 0.18,
+        "remote_write_bw_gbps": 0.02,
+        "total_bw_gbps": 311.2
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 71.24007655,
+      "bench_aggregate_traffic_gbps_sum": 213.7202296,
+      "bench_results": [
+        {
+          "calls": 87092063,
+          "cycles_per_call": 13207.28439,
+          "cycles_per_traffic_byte": 1.074811555,
+          "payload_bytes": 356729090048,
+          "payload_gb_per_sec": 71.24007655,
+          "seconds": 5.007421487,
+          "threads": 96,
+          "traffic_bytes": 1070187270144,
+          "traffic_gb_per_sec": 213.7202296
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1306.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "local_numa1",
+      "uprof": {
+        "local_read_bw_gbps": 190.64,
+        "local_write_bw_gbps": 124.05,
+        "remote_pct": 0.11110053010824365,
+        "remote_read_bw_gbps": 0.31,
+        "remote_write_bw_gbps": 0.04,
+        "total_bw_gbps": 315.03
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 71.25217609,
+      "bench_aggregate_traffic_gbps_sum": 213.7565283,
+      "bench_results": [
+        {
+          "calls": 87075910,
+          "cycles_per_call": 13209.74339,
+          "cycles_per_traffic_byte": 1.075011669,
+          "payload_bytes": 356662927360,
+          "payload_gb_per_sec": 71.25217609,
+          "seconds": 5.005642591,
+          "threads": 96,
+          "traffic_bytes": 1069988782080,
+          "traffic_gb_per_sec": 213.7565283
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1308.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "local_numa1",
+      "uprof": {
+        "local_read_bw_gbps": 187.15,
+        "local_write_bw_gbps": 123.78,
+        "remote_pct": 0.05464480874316939,
+        "remote_read_bw_gbps": 0.15,
+        "remote_write_bw_gbps": 0.02,
+        "total_bw_gbps": 311.1
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 36.74473375,
+      "bench_aggregate_traffic_gbps_sum": 110.2342012,
+      "bench_results": [
+        {
+          "calls": 44931359,
+          "cycles_per_call": 25600.20815,
+          "cycles_per_traffic_byte": 2.083350272,
+          "payload_bytes": 184038846464,
+          "payload_gb_per_sec": 36.74473375,
+          "seconds": 5.008577494,
+          "threads": 96,
+          "traffic_bytes": 552116539392,
+          "traffic_gb_per_sec": 110.2342012
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1306.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "remote_0_to_1",
+      "uprof": {
+        "local_read_bw_gbps": 0.33,
+        "local_write_bw_gbps": 0.09,
+        "remote_pct": 99.75084534614699,
+        "remote_read_bw_gbps": 100.77,
+        "remote_write_bw_gbps": 67.38,
+        "total_bw_gbps": 168.57
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 36.77060056,
+      "bench_aggregate_traffic_gbps_sum": 110.3118017,
+      "bench_results": [
+        {
+          "calls": 44960457,
+          "cycles_per_call": 25583.62059,
+          "cycles_per_traffic_byte": 2.082000374,
+          "payload_bytes": 184158031872,
+          "payload_gb_per_sec": 36.77060056,
+          "seconds": 5.008295461,
+          "threads": 96,
+          "traffic_bytes": 552474095616,
+          "traffic_gb_per_sec": 110.3118017
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1308.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "remote_0_to_1",
+      "uprof": {
+        "local_read_bw_gbps": 0.37,
+        "local_write_bw_gbps": 0.1,
+        "remote_pct": 99.71990464839095,
+        "remote_read_bw_gbps": 98.68,
+        "remote_write_bw_gbps": 68.65,
+        "total_bw_gbps": 167.8
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 36.74017904,
+      "bench_aggregate_traffic_gbps_sum": 110.2205371,
+      "bench_results": [
+        {
+          "calls": 44927227,
+          "cycles_per_call": 25602.4191,
+          "cycles_per_traffic_byte": 2.0835302,
+          "payload_bytes": 184021921792,
+          "payload_gb_per_sec": 36.74017904,
+          "seconds": 5.008737752,
+          "threads": 96,
+          "traffic_bytes": 552065765376,
+          "traffic_gb_per_sec": 110.2205371
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1302.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "remote_0_to_1",
+      "uprof": {
+        "local_read_bw_gbps": 0.38,
+        "local_write_bw_gbps": 0.09,
+        "remote_pct": 99.72530753612803,
+        "remote_read_bw_gbps": 98.21,
+        "remote_write_bw_gbps": 68.79,
+        "total_bw_gbps": 167.46
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 36.55944189,
+      "bench_aggregate_traffic_gbps_sum": 109.6783257,
+      "bench_results": [
+        {
+          "calls": 44703982,
+          "cycles_per_call": 25730.27484,
+          "cycles_per_traffic_byte": 2.093935127,
+          "payload_bytes": 183107510272,
+          "payload_gb_per_sec": 36.55944189,
+          "seconds": 5.00848757,
+          "threads": 96,
+          "traffic_bytes": 549322530816,
+          "traffic_gb_per_sec": 109.6783257
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1302.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "remote_1_to_0",
+      "uprof": {
+        "local_read_bw_gbps": 0.3,
+        "local_write_bw_gbps": 0.08,
+        "remote_pct": 99.78781284004353,
+        "remote_read_bw_gbps": 109.89,
+        "remote_write_bw_gbps": 73.52,
+        "total_bw_gbps": 183.8
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 36.44053876,
+      "bench_aggregate_traffic_gbps_sum": 109.3216163,
+      "bench_results": [
+        {
+          "calls": 44581606,
+          "cycles_per_call": 25801.00985,
+          "cycles_per_traffic_byte": 2.099691557,
+          "payload_bytes": 182606258176,
+          "payload_gb_per_sec": 36.44053876,
+          "seconds": 5.011074599,
+          "threads": 96,
+          "traffic_bytes": 547818774528,
+          "traffic_gb_per_sec": 109.3216163
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1306.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "remote_1_to_0",
+      "uprof": {
+        "local_read_bw_gbps": 0.44,
+        "local_write_bw_gbps": 0.11,
+        "remote_pct": 99.65963240299523,
+        "remote_read_bw_gbps": 97.02,
+        "remote_write_bw_gbps": 64.02,
+        "total_bw_gbps": 161.59
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 36.5629392,
+      "bench_aggregate_traffic_gbps_sum": 109.6888176,
+      "bench_results": [
+        {
+          "calls": 44722495,
+          "cycles_per_call": 25719.74298,
+          "cycles_per_traffic_byte": 2.093078042,
+          "payload_bytes": 183183339520,
+          "payload_gb_per_sec": 36.5629392,
+          "seconds": 5.010082437,
+          "threads": 96,
+          "traffic_bytes": 549550018560,
+          "traffic_gb_per_sec": 109.6888176
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1308.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "remote_1_to_0",
+      "uprof": {
+        "local_read_bw_gbps": 0.4,
+        "local_write_bw_gbps": 0.1,
+        "remote_pct": 99.69201038710067,
+        "remote_read_bw_gbps": 98.17,
+        "remote_write_bw_gbps": 66.91,
+        "total_bw_gbps": 165.59
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 140.92116051,
+      "bench_aggregate_traffic_gbps_sum": 422.7634815,
+      "bench_results": [
+        {
+          "calls": 86105881,
+          "cycles_per_call": 13358.49339,
+          "cycles_per_traffic_byte": 1.087116975,
+          "payload_bytes": 352689688576,
+          "payload_gb_per_sec": 70.44730814,
+          "seconds": 5.006432437,
+          "threads": 96,
+          "traffic_bytes": 1058069065728,
+          "traffic_gb_per_sec": 211.3419244
+        },
+        {
+          "calls": 86153201,
+          "cycles_per_call": 13351.15984,
+          "cycles_per_traffic_byte": 1.086520169,
+          "payload_bytes": 352883511296,
+          "payload_gb_per_sec": 70.47385237,
+          "seconds": 5.007297025,
+          "threads": 96,
+          "traffic_bytes": 1058650533888,
+          "traffic_gb_per_sec": 211.4215571
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1302.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "dual_local",
+      "uprof": {
+        "local_read_bw_gbps": 369.34,
+        "local_write_bw_gbps": 245.87,
+        "remote_pct": 0.05848238218236756,
+        "remote_read_bw_gbps": 0.33,
+        "remote_write_bw_gbps": 0.03,
+        "total_bw_gbps": 615.57
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 140.89167171,
+      "bench_aggregate_traffic_gbps_sum": 422.6750151,
+      "bench_results": [
+        {
+          "calls": 86072407,
+          "cycles_per_call": 13363.75134,
+          "cycles_per_traffic_byte": 1.087544869,
+          "payload_bytes": 352552579072,
+          "payload_gb_per_sec": 70.4181969,
+          "seconds": 5.006555047,
+          "threads": 96,
+          "traffic_bytes": 1057657737216,
+          "traffic_gb_per_sec": 211.2545907
+        },
+        {
+          "calls": 86175597,
+          "cycles_per_call": 13347.74974,
+          "cycles_per_traffic_byte": 1.086242655,
+          "payload_bytes": 352975245312,
+          "payload_gb_per_sec": 70.47347481,
+          "seconds": 5.008625533,
+          "threads": 96,
+          "traffic_bytes": 1058925735936,
+          "traffic_gb_per_sec": 211.4204244
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1308.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "dual_local",
+      "uprof": {
+        "local_read_bw_gbps": 369.44,
+        "local_write_bw_gbps": 245.28,
+        "remote_pct": 0.04715370481780785,
+        "remote_read_bw_gbps": 0.27,
+        "remote_write_bw_gbps": 0.02,
+        "total_bw_gbps": 615.01
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 141.00863431,
+      "bench_aggregate_traffic_gbps_sum": 423.02590299999997,
+      "bench_results": [
+        {
+          "calls": 86301057,
+          "cycles_per_call": 13328.33781,
+          "cycles_per_traffic_byte": 1.084662907,
+          "payload_bytes": 353489129472,
+          "payload_gb_per_sec": 70.58758339,
+          "seconds": 5.007808916,
+          "threads": 96,
+          "traffic_bytes": 1060467388416,
+          "traffic_gb_per_sec": 211.7627502
+        },
+        {
+          "calls": 86075494,
+          "cycles_per_call": 13363.26554,
+          "cycles_per_traffic_byte": 1.087505333,
+          "payload_bytes": 352565223424,
+          "payload_gb_per_sec": 70.42105092,
+          "seconds": 5.006531695,
+          "threads": 96,
+          "traffic_bytes": 1057695670272,
+          "traffic_gb_per_sec": 211.2631528
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1306.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "dual_local",
+      "uprof": {
+        "local_read_bw_gbps": 370.11,
+        "local_write_bw_gbps": 244.38,
+        "remote_pct": 0.05692445311864682,
+        "remote_read_bw_gbps": 0.32,
+        "remote_write_bw_gbps": 0.03,
+        "total_bw_gbps": 614.85
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 45.10392501,
+      "bench_aggregate_traffic_gbps_sum": 135.31177504,
+      "bench_results": [
+        {
+          "calls": 27153568,
+          "cycles_per_call": 42360.95221,
+          "cycles_per_traffic_byte": 3.447343116,
+          "payload_bytes": 111221014528,
+          "payload_gb_per_sec": 22.20595105,
+          "seconds": 5.008612974,
+          "threads": 96,
+          "traffic_bytes": 333663043584,
+          "traffic_gb_per_sec": 66.61785315
+        },
+        {
+          "calls": 28067751,
+          "cycles_per_call": 40981.26208,
+          "cycles_per_traffic_byte": 3.335063645,
+          "payload_bytes": 114965508096,
+          "payload_gb_per_sec": 22.89797396,
+          "seconds": 5.020772068,
+          "threads": 96,
+          "traffic_bytes": 344896524288,
+          "traffic_gb_per_sec": 68.69392189
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1308.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "dual_cross",
+      "uprof": {
+        "local_read_bw_gbps": 0.39,
+        "local_write_bw_gbps": 0.1,
+        "remote_pct": 99.78000269384457,
+        "remote_read_bw_gbps": 133.11,
+        "remote_write_bw_gbps": 89.13,
+        "total_bw_gbps": 222.73
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 45.05212993,
+      "bench_aggregate_traffic_gbps_sum": 135.15638979,
+      "bench_results": [
+        {
+          "calls": 27250941,
+          "cycles_per_call": 42209.59876,
+          "cycles_per_traffic_byte": 3.435025941,
+          "payload_bytes": 111619854336,
+          "payload_gb_per_sec": 22.26806544,
+          "seconds": 5.012552826,
+          "threads": 96,
+          "traffic_bytes": 334859563008,
+          "traffic_gb_per_sec": 66.80419631
+        },
+        {
+          "calls": 27869437,
+          "cycles_per_call": 41272.8208,
+          "cycles_per_traffic_byte": 3.358790756,
+          "payload_bytes": 114153213952,
+          "payload_gb_per_sec": 22.78406449,
+          "seconds": 5.010221683,
+          "threads": 96,
+          "traffic_bytes": 342459641856,
+          "traffic_gb_per_sec": 68.35219348
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1306.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "dual_cross",
+      "uprof": {
+        "local_read_bw_gbps": 0.32,
+        "local_write_bw_gbps": 0.09,
+        "remote_pct": 99.82008725768003,
+        "remote_read_bw_gbps": 132.52,
+        "remote_write_bw_gbps": 89.41,
+        "total_bw_gbps": 222.33
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 45.3306039,
+      "bench_aggregate_traffic_gbps_sum": 135.9918117,
+      "bench_results": [
+        {
+          "calls": 27349537,
+          "cycles_per_call": 42057.22079,
+          "cycles_per_traffic_byte": 3.42262539,
+          "payload_bytes": 112023703552,
+          "payload_gb_per_sec": 22.36164727,
+          "seconds": 5.009635569,
+          "threads": 96,
+          "traffic_bytes": 336071110656,
+          "traffic_gb_per_sec": 67.08494181
+        },
+        {
+          "calls": 28114991,
+          "cycles_per_call": 40912.22971,
+          "cycles_per_traffic_byte": 3.329445777,
+          "payload_bytes": 115159003136,
+          "payload_gb_per_sec": 22.96895663,
+          "seconds": 5.013680203,
+          "threads": 96,
+          "traffic_bytes": 345477009408,
+          "traffic_gb_per_sec": 68.90686989
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1302.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "dual_cross",
+      "uprof": {
+        "local_read_bw_gbps": 0.44,
+        "local_write_bw_gbps": 0.12,
+        "remote_pct": 99.75513111615689,
+        "remote_read_bw_gbps": 135.47,
+        "remote_write_bw_gbps": 88.59,
+        "total_bw_gbps": 224.61
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 74.25856636,
+      "bench_aggregate_traffic_gbps_sum": 222.77569911,
+      "bench_results": [
+        {
+          "calls": 65838026,
+          "cycles_per_call": 17470.91615,
+          "cycles_per_traffic_byte": 1.421786796,
+          "payload_bytes": 269672554496,
+          "payload_gb_per_sec": 53.86047749,
+          "seconds": 5.006872703,
+          "threads": 96,
+          "traffic_bytes": 809017663488,
+          "traffic_gb_per_sec": 161.5814325
+        },
+        {
+          "calls": 24944481,
+          "cycles_per_call": 46112.42174,
+          "cycles_per_traffic_byte": 3.752638488,
+          "payload_bytes": 102172594176,
+          "payload_gb_per_sec": 20.39808887,
+          "seconds": 5.00892975,
+          "threads": 96,
+          "traffic_bytes": 306517782528,
+          "traffic_gb_per_sec": 61.19426661
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1306.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "mixed_target_0",
+      "uprof": {
+        "local_read_bw_gbps": 161.41,
+        "local_write_bw_gbps": 108.01,
+        "remote_pct": 25.40768016833246,
+        "remote_read_bw_gbps": 53.44,
+        "remote_write_bw_gbps": 38.33,
+        "total_bw_gbps": 361.19
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 74.49528092,
+      "bench_aggregate_traffic_gbps_sum": 223.48584279,
+      "bench_results": [
+        {
+          "calls": 65717926,
+          "cycles_per_call": 17502.7588,
+          "cycles_per_traffic_byte": 1.424378158,
+          "payload_bytes": 269180624896,
+          "payload_gb_per_sec": 53.75932549,
+          "seconds": 5.007142899,
+          "threads": 96,
+          "traffic_bytes": 807541874688,
+          "traffic_gb_per_sec": 161.2779765
+        },
+        {
+          "calls": 25361482,
+          "cycles_per_call": 45354.03659,
+          "cycles_per_traffic_byte": 3.690920946,
+          "payload_bytes": 103880630272,
+          "payload_gb_per_sec": 20.73595543,
+          "seconds": 5.009686225,
+          "threads": 96,
+          "traffic_bytes": 311641890816,
+          "traffic_gb_per_sec": 62.20786629
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1302.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "mixed_target_0",
+      "uprof": {
+        "local_read_bw_gbps": 160.94,
+        "local_write_bw_gbps": 108.23,
+        "remote_pct": 25.055685488361735,
+        "remote_read_bw_gbps": 52.4,
+        "remote_write_bw_gbps": 37.59,
+        "total_bw_gbps": 359.16
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 75.47099633,
+      "bench_aggregate_traffic_gbps_sum": 226.41298896,
+      "bench_results": [
+        {
+          "calls": 66149605,
+          "cycles_per_call": 17388.62442,
+          "cycles_per_traffic_byte": 1.415089878,
+          "payload_bytes": 270948782080,
+          "payload_gb_per_sec": 54.03845968,
+          "seconds": 5.013998987,
+          "threads": 96,
+          "traffic_bytes": 812846346240,
+          "traffic_gb_per_sec": 162.115379
+        },
+        {
+          "calls": 26210524,
+          "cycles_per_call": 43885.08568,
+          "cycles_per_traffic_byte": 3.571377415,
+          "payload_bytes": 107358306304,
+          "payload_gb_per_sec": 21.43253665,
+          "seconds": 5.009127386,
+          "threads": 96,
+          "traffic_bytes": 322074918912,
+          "traffic_gb_per_sec": 64.29760996
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 0,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1308.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "mixed_target_0",
+      "uprof": {
+        "local_read_bw_gbps": 165.04,
+        "local_write_bw_gbps": 107.87,
+        "remote_pct": 24.304534738593812,
+        "remote_read_bw_gbps": 53.0,
+        "remote_write_bw_gbps": 34.63,
+        "total_bw_gbps": 360.55
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 73.43393778000001,
+      "bench_aggregate_traffic_gbps_sum": 220.30181339,
+      "bench_results": [
+        {
+          "calls": 24459491,
+          "cycles_per_call": 47026.7536,
+          "cycles_per_traffic_byte": 3.827047005,
+          "payload_bytes": 100186075136,
+          "payload_gb_per_sec": 20.00101206,
+          "seconds": 5.009050283,
+          "threads": 96,
+          "traffic_bytes": 300558225408,
+          "traffic_gb_per_sec": 60.00303619
+        },
+        {
+          "calls": 65318769,
+          "cycles_per_call": 17609.79097,
+          "cycles_per_traffic_byte": 1.433088458,
+          "payload_bytes": 267545677824,
+          "payload_gb_per_sec": 53.43292572,
+          "seconds": 5.007131356,
+          "threads": 96,
+          "traffic_bytes": 802637033472,
+          "traffic_gb_per_sec": 160.2987772
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1306.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "mixed_target_1",
+      "uprof": {
+        "local_read_bw_gbps": 164.9,
+        "local_write_bw_gbps": 109.49,
+        "remote_pct": 26.275626729720287,
+        "remote_read_bw_gbps": 56.62,
+        "remote_write_bw_gbps": 41.17,
+        "total_bw_gbps": 372.17
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 75.6820795,
+      "bench_aggregate_traffic_gbps_sum": 227.04623851,
+      "bench_results": [
+        {
+          "calls": 25881275,
+          "cycles_per_call": 44443.36745,
+          "cycles_per_traffic_byte": 3.616810502,
+          "payload_bytes": 106009702400,
+          "payload_gb_per_sec": 21.16617407,
+          "seconds": 5.008448955,
+          "threads": 96,
+          "traffic_bytes": 318029107200,
+          "traffic_gb_per_sec": 63.49852221
+        },
+        {
+          "calls": 66642150,
+          "cycles_per_call": 17260.1067,
+          "cycles_per_traffic_byte": 1.404631079,
+          "payload_bytes": 272966246400,
+          "payload_gb_per_sec": 54.51590543,
+          "seconds": 5.007093696,
+          "threads": 96,
+          "traffic_bytes": 818898739200,
+          "traffic_gb_per_sec": 163.5477163
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1308.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "mixed_target_1",
+      "uprof": {
+        "local_read_bw_gbps": 164.79,
+        "local_write_bw_gbps": 109.85,
+        "remote_pct": 24.203786498868467,
+        "remote_read_bw_gbps": 51.77,
+        "remote_write_bw_gbps": 35.93,
+        "total_bw_gbps": 362.34
+      }
+    },
+    {
+      "bench_aggregate_payload_gbps_sum": 76.35490929,
+      "bench_aggregate_traffic_gbps_sum": 229.06472786999998,
+      "bench_results": [
+        {
+          "calls": 26785255,
+          "cycles_per_call": 42943.24045,
+          "cycles_per_traffic_byte": 3.494729855,
+          "payload_bytes": 109712404480,
+          "payload_gb_per_sec": 21.90404769,
+          "seconds": 5.008773083,
+          "threads": 96,
+          "traffic_bytes": 329137213440,
+          "traffic_gb_per_sec": 65.71214307
+        },
+        {
+          "calls": 66697680,
+          "cycles_per_call": 17245.65481,
+          "cycles_per_traffic_byte": 1.403454981,
+          "payload_bytes": 273193697280,
+          "payload_gb_per_sec": 54.4508616,
+          "seconds": 5.017252055,
+          "threads": 96,
+          "traffic_bytes": 819581091840,
+          "traffic_gb_per_sec": 163.3525848
+        }
+      ],
+      "commands": [
+        {
+          "cpu_list": "0-95",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        },
+        {
+          "cpu_list": "96-191",
+          "duration_sec": 5,
+          "membind": 1,
+          "size": 4096,
+          "threads": 96,
+          "warmup_sec": 1,
+          "working_set_bytes": 67108864
+        }
+      ],
+      "host": "node-1302.ydb-dev.ik8s.nebiuscloud.net",
+      "scenario": "mixed_target_1",
+      "uprof": {
+        "local_read_bw_gbps": 165.09,
+        "local_write_bw_gbps": 110.11,
+        "remote_pct": 23.555555555555554,
+        "remote_read_bw_gbps": 49.89,
+        "remote_write_bw_gbps": 34.91,
+        "total_bw_gbps": 360.0
+      }
+    }
+  ],
+  "size": 4096,
+  "warmup_sec": 1,
+  "working_set_bytes": 67108864
+}
