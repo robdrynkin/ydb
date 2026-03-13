@@ -221,7 +221,7 @@ class TLogWriterLoadTestActor : public TActorBootstrapped<TLogWriterLoadTestActo
         }
 
     public:
-        bool ConfirmedSize() {
+        ui32 ConfirmedSize() const {
             return ConfirmedBlobs.size();
         }
 
@@ -1255,7 +1255,6 @@ class TLogWriterLoadTestActor : public TActorBootstrapped<TLogWriterLoadTestActo
                 ReadSentTimestamp.erase(it);
 
                 ReadResponseQT->Increment(response.MicroSeconds());
-                IssueReadIfPossible(ctx);
             };
 
             NWilson::TTraceId traceId = (TracingThrottler && !TracingThrottler->Throttle())
@@ -1276,11 +1275,24 @@ class TLogWriterLoadTestActor : public TActorBootstrapped<TLogWriterLoadTestActo
             }
             NextReadInQueue = false;
         }
+
+        bool CanIssueReadRequest() const {
+            return ReadSettings.LoadEnabled &&
+                !ReadSettings.InFlightTracker.LimitReached() &&
+                ConfirmedBlobIds.size() + InitialAllocation.ConfirmedSize() > 0;
+        }
     };
 
     enum EWakeupType : ui32 {
         MAIN_CYCLE = 0,
         DELAY_AFTER_INITIAL_WRITE,
+    };
+
+    enum class EMainLoadType : ui8 {
+        NONE = 0,
+        WRITE_ONLY,
+        READ_ONLY,
+        READ_WRITE,
     };
 
 
@@ -1320,6 +1332,10 @@ class TLogWriterLoadTestActor : public TActorBootstrapped<TLogWriterLoadTestActo
     bool TryRdmaMemory = false;
     TTabletWriter::TRequestDispatchingSettings WriteSettings;
     TTabletWriter::TRequestDispatchingSettings ReadSettings;
+    EMainLoadType MainLoadType = EMainLoadType::NONE;
+    bool WorkersStarted = false;
+    bool Stopping = false;
+    static constexpr ui32 RequestsPerWakeupIteration = 2;
 
 public:
     static constexpr NKikimrServices::TActivity::EType ActorActivityType() {
@@ -1339,12 +1355,14 @@ public:
 
         std::unordered_map<TString, ui64> tabletIds;
         ui32 maxBlobSize = 0U;
+        bool hasWriteLoad = false;
+        bool hasReadLoad = false;
         for (const auto& profile : cmd.GetTablets()) {
             if (!profile.TabletsSize()) {
                 ythrow TLoadActorException() << "TPerTabletProfile.Tablets must have at least one item";
             }
             bool enableWrites = profile.WriteSizesSize() && profile.GetPutHandleClass() &&
-                    (profile.WriteIntervalsSize() || profile.HasWriteHardRateDispatcher());
+                    (profile.WriteIntervalsSize() || profile.HasWriteHardRateDispatcher() || profile.GetMaxInFlightWriteRequests() > 0);
 
             TContentType contentType = profile.HasContentType()
                     ? profile.GetContentType()
@@ -1387,7 +1405,13 @@ public:
             maxBlobSize = std::max(maxBlobSize, WriteSettings.SizeGen->GetMax());
             TryRdmaMemory |= (bool)profile.GetRdmaMode();
 
-            bool enableReads = profile.ReadIntervalsSize() || profile.HasReadHardRateDispatcher();
+            bool enableReads = profile.ReadIntervalsSize() || profile.HasReadHardRateDispatcher() || profile.GetMaxInFlightReadRequests() > 0;
+            if (enableReads && !enableWrites && initialAllocation.IsEmpty()) {
+                ythrow TLoadActorException() << "Read-only mode requires InitialAllocation";
+            }
+            hasWriteLoad = hasWriteLoad || enableWrites;
+            hasReadLoad = hasReadLoad || enableReads;
+
             NKikimrBlobStorage::EGetHandleClass getHandleClass = NKikimrBlobStorage::EGetHandleClass::FastRead;
             if (profile.HasGetHandleClass()) {
                 getHandleClass = profile.GetGetHandleClass();
@@ -1484,9 +1508,21 @@ public:
             }
         }
         MaxBlobSize = maxBlobSize;
+
+        if (!hasWriteLoad && !hasReadLoad) {
+            ythrow TLoadActorException() << "Either write load or read load must be configured";
+        }
+        if (hasWriteLoad && hasReadLoad) {
+            MainLoadType = EMainLoadType::READ_WRITE;
+        } else {
+            MainLoadType = hasWriteLoad ? EMainLoadType::WRITE_ONLY : EMainLoadType::READ_ONLY;
+        }
     }
 
     void StartWorkers(const TActorContext& ctx) {
+        if (WorkersStarted || Stopping) {
+            return;
+        }
         // Cerr << "tyui" << Endl;
         WriteSettings.DelayManager->Start(TActivationContext::Monotonic());
         ReadSettings.DelayManager->Start(TActivationContext::Monotonic());
@@ -1497,6 +1533,7 @@ public:
         for (auto& writer : TabletWriters) {
             writer->StartWorking(ctx);
         }
+        WorkersStarted = true;
         TestStartTime = TActivationContext::Monotonic();
         // Cerr << "asdf" << Endl;
         for (ui32 i = 0; i < 4096; ++i) {
@@ -1522,6 +1559,7 @@ public:
         BlobData = GenDataAsRcBuf(MaxBlobSize, TryRdmaMemory ? ctx.ActorSystem()->GetRcBufAllocator() : GetDefaultRcBufAllocator());
         Become(&TLogWriterLoadTestActor::StateFunc);
         EarlyStop = false;
+        Stopping = false;
         for (auto& writer : TabletWriters) {
             writer->Bootstrap(ctx);
         }
@@ -1532,6 +1570,10 @@ public:
     }
 
     void HandlePoison(const TActorContext& ctx) {
+        if (Stopping) {
+            return;
+        }
+        Stopping = true;
         if (TestDuration.Defined()) {
             EarlyStop = TActivationContext::Monotonic() - TestStartTime < TestDuration;
         }
@@ -1577,8 +1619,9 @@ public:
     }
 
     void HandleWakeup(TEvents::TEvWakeup::TPtr& ev, const TActorContext& ctx) {
-        Y_UNUSED(ev);
-        Y_UNUSED(ctx);
+        if (ev->Get()->Tag == DELAY_AFTER_INITIAL_WRITE) {
+            StartWorkers(ctx);
+        }
         // // Cerr << "HandleWakeup " << ev->Sender.ToString() << " " << ev->Get()->Tag << Endl;
         // switch (ev->Get()->Tag) {
         // case MAIN_CYCLE:
@@ -1596,17 +1639,40 @@ public:
     }
 
     void UpdateWakeupQueue(const TActorContext& ctx) {
+        if (!WorkersStarted || Stopping || TabletWriters.empty()) {
+            return;
+        }
         // auto now = TActivationContext::Monotonic();
 
         auto& writer = TabletWriters[CurrentWriterIndex];
         CurrentWriterIndex = (CurrentWriterIndex + 1) % TabletWriters.size();
-        // Cerr << "IssueWriteIfPossible " << CurrentWriterIndex << " " << now.MilliSeconds() << Endl;
-        // Cerr << "IssueWriteRequest " << CurrentWriterIndex << Endl;
-        writer->IssueWriteRequest(ctx);
-        writer->IssueWriteRequest(ctx);
-        // writer->IssueWriteIfPossible(ctx);
-        // writer->IssueReadIfPossible(ctx);
-        writer->IssueGarbageCollectionIfPossible(ctx);
+        for (ui32 i = 0; i < RequestsPerWakeupIteration; ++i) {
+            switch (MainLoadType) {
+                case EMainLoadType::WRITE_ONLY:
+                    writer->IssueWriteRequest(ctx);
+                    break;
+
+                case EMainLoadType::READ_ONLY:
+                    if (writer->CanIssueReadRequest()) {
+                        writer->IssueReadRequest(ctx);
+                    }
+                    break;
+
+                case EMainLoadType::READ_WRITE:
+                    writer->IssueWriteRequest(ctx);
+                    if (writer->CanIssueReadRequest()) {
+                        writer->IssueReadRequest(ctx);
+                    }
+                    break;
+
+                case EMainLoadType::NONE:
+                    break;
+            }
+        }
+
+        if (MainLoadType == EMainLoadType::WRITE_ONLY || MainLoadType == EMainLoadType::READ_WRITE) {
+            writer->IssueGarbageCollectionIfPossible(ctx);
+        }
 
         // NextWriteTimestamp += WriteSettings.DelayManager->CalculateDelayForNextRequest(now);
         // NextReadTimestamp += ReadSettings.DelayManager->CalculateDelayForNextRequest(now);
@@ -1651,8 +1717,15 @@ public:
     void HandleDispatcher(TPtr& ev, const TActorContext& ctx) {
         // Cerr << "HandleDispatcher " << ev->Sender.ToString() << Endl;
         QueryDispatcher.ProcessEvent(ev, ctx);
-        if (ev->Get()->EventType == TEvBlobStorage::TEvPutResult::EventType) {
-            // Cerr << "TEvPut " << ev->ToString() << Endl;
+        if (!WorkersStarted || Stopping) {
+            return;
+        }
+
+        const ui32 eventType = ev->Get()->EventType;
+        if ((MainLoadType == EMainLoadType::WRITE_ONLY && eventType == TEvBlobStorage::TEvPutResult::EventType) ||
+                (MainLoadType == EMainLoadType::READ_ONLY && eventType == TEvBlobStorage::TEvGetResult::EventType) ||
+                (MainLoadType == EMainLoadType::READ_WRITE &&
+                    (eventType == TEvBlobStorage::TEvPutResult::EventType || eventType == TEvBlobStorage::TEvGetResult::EventType))) {
             UpdateWakeupQueue(ctx);
         }
     }

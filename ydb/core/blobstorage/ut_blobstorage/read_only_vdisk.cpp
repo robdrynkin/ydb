@@ -4,6 +4,9 @@
 
 #include <library/cpp/protobuf/util/pb_io.h>
 
+#include <atomic>
+#include <utility>
+
 
 struct TTetsEnv {
     TTetsEnv()
@@ -148,17 +151,17 @@ struct TTetsEnv {
         StorageLoadActorId = Env.Runtime->Register(NKikimr::CreateLoadTestActor(Counters), TActorId(), 0, std::nullopt, 1);
     }
 
-    auto RunStorageLoad() {
-        if (!StorageLoadActorId) {
-            StartStorageLoadActor();
-        }
-        const TActorId sender = Env.Runtime->AllocateEdgeActor(VDiskActorId.NodeId(), __FILE__, __LINE__);
-        auto ev = std::make_unique<TEvLoad::TEvLoadTestRequest>();
+    struct TStorageLoadRunResult {
+        bool Success = false;
+        ui64 PutRequests = 0;
+        ui64 GetRequests = 0;
+    };
 
-        TString conf("StorageLoad: {\n"
+    TString MakeWriteOnlyStorageLoadConfig() const {
+        return TString("StorageLoad: {\n"
             "DurationSeconds: 8\n"
             "Tablets: {\n"
-                "Tablets: { TabletId: 1 Channel: 0 GroupId: " + ToString(GroupInfo->GroupID) + " Generation: 1 }\n"
+                "Tablets: { TabletId: 1 Channel: 0 GroupId: ") + ToString(GroupInfo->GroupID) + TString(" Generation: 1 }\n"
                 "WriteSizes: { Weight: 1.0 Min: 1000000 Max: 4000000 }\n"
                 "WriteIntervals: { Weight: 1.0 Uniform: { MinUs: 100000 MaxUs: 100000 } }\n"
                 "MaxInFlightWriteRequests: 10\n"
@@ -166,6 +169,55 @@ struct TTetsEnv {
                 "PutHandleClass: TabletLog\n"
             "}\n"
         "}");
+    }
+
+    TString MakeReadOnlyStorageLoadConfig() const {
+        return TString("StorageLoad: {\n"
+            "DurationSeconds: 8\n"
+            "Tablets: {\n"
+                "Tablets: { TabletId: 1 Channel: 0 GroupId: ") + ToString(GroupInfo->GroupID) + TString(" Generation: 1 }\n"
+                "InitialAllocation: {\n"
+                    "BlobsNumber: 64\n"
+                    "BlobSizes: { Weight: 1.0 Min: 32768 Max: 32768 }\n"
+                    "MaxWritesInFlight: 16\n"
+                    "PutHandleClass: TabletLog\n"
+                "}\n"
+                "ReadIntervals: { Weight: 1.0 Uniform: { MinUs: 100000 MaxUs: 100000 } }\n"
+                "ReadSizes: { Weight: 1.0 Min: 4096 Max: 16384 }\n"
+                "MaxInFlightReadRequests: 10\n"
+                "GetHandleClass: FastRead\n"
+                "FlushIntervals: { Weight: 1.0 Uniform: { MinUs: 1000000 MaxUs: 1000000 } }\n"
+            "}\n"
+        "}");
+    }
+
+    TStorageLoadRunResult RunStorageLoad(const TString& conf, bool waitForFinish = true,
+            ui64 minPutRequests = 0, ui64 minGetRequests = 0) {
+        if (!StorageLoadActorId) {
+            StartStorageLoadActor();
+        }
+        TStorageLoadRunResult result;
+        std::atomic<ui64> putRequests = 0;
+        std::atomic<ui64> getRequests = 0;
+        auto previousFilter = Env.Runtime->FilterFunction;
+        Env.Runtime->FilterFunction = [&putRequests, &getRequests, previousFilter](ui32 nodeId, std::unique_ptr<IEventHandle>& ev) {
+            switch (ev->GetTypeRewrite()) {
+                case TEvBlobStorage::EvPut:
+                    ++putRequests;
+                    // Cerr << "Put request: " << putRequests.load() << Endl;
+                    break;
+                case TEvBlobStorage::EvGet:
+                    ++getRequests;
+                    // Cerr << "Get request: " << getRequests.load() << Endl;
+                    break;
+                default:
+                    break;
+            }
+            return previousFilter ? previousFilter(nodeId, ev) : true;
+        };
+
+        const TActorId sender = Env.Runtime->AllocateEdgeActor(VDiskActorId.NodeId(), __FILE__, __LINE__);
+        auto ev = std::make_unique<TEvLoad::TEvLoadTestRequest>();
         auto constStream = TStringInput(conf);
         ev->Record = ParseFromTextFormat<NKikimr::TEvLoadTestRequest>(constStream);
         Env.Runtime->WrapInActorContext(sender, [&] {
@@ -175,11 +227,54 @@ struct TTetsEnv {
             auto res = Env.WaitForEdgeActorEvent<TEvLoad::TEvLoadTestResponse>(sender, false);
             UNIT_ASSERT_VALUES_EQUAL(res->Get()->Record.GetStatus(), 1);
         }
-        {
-            auto res = Env.WaitForEdgeActorEvent<TEvLoad::TEvNodeFinishResponse>(sender, false);
-            UNIT_ASSERT(res->Get()->Record.GetSuccess());
+
+        if (!waitForFinish) {
+            constexpr ui32 maxIterations = 20000;
+            for (ui32 i = 0; i < maxIterations && (putRequests.load() < minPutRequests || getRequests.load() < minGetRequests); ++i) {
+                bool iteration = true;
+                Env.Runtime->Sim([&] {
+                    return std::exchange(iteration, false);
+                });
+            }
+
+            result.PutRequests = putRequests.load();
+            result.GetRequests = getRequests.load();
+            Env.Runtime->FilterFunction = previousFilter;
+            Env.Runtime->DestroyActor(StorageLoadActorId);
+            StorageLoadActorId = {};
+            return result;
         }
-        Env.Sim(TDuration::Seconds(60));
+
+        constexpr ui32 maxWaitSeconds = 180;
+        for (ui32 i = 0; i < maxWaitSeconds; ++i) {
+            auto res = Env.WaitForEdgeActorEvent<TEvLoad::TEvNodeFinishResponse>(
+                sender,
+                false,
+                Env.Now() + TDuration::Seconds(1)
+            );
+            if (res) {
+                result.PutRequests = putRequests.load();
+                result.GetRequests = getRequests.load();
+                result.Success = res->Get()->Record.GetSuccess();
+                UNIT_ASSERT(result.Success);
+                Env.Runtime->FilterFunction = previousFilter;
+                Env.Sim(TDuration::Seconds(1));
+                return result;
+            }
+
+            // Load actor completion is driven by scheduled events, so we need to advance simulated time.
+            Env.Sim(TDuration::Seconds(1));
+        }
+
+        result.PutRequests = putRequests.load();
+        result.GetRequests = getRequests.load();
+        Env.Runtime->FilterFunction = previousFilter;
+        UNIT_ASSERT_C(false, "timed out while waiting for TEvNodeFinishResponse");
+        return result;
+    }
+
+    void RunStorageLoad() {
+        RunStorageLoad(MakeWriteOnlyStorageLoadConfig(), false, 1, 0);
     }
 
     TEnvironmentSetup Env;
@@ -426,6 +521,19 @@ Y_UNIT_TEST_SUITE(ReadOnlyVDisk) {
         }
 
         env.ReadAllBlobs(step);
+    }
+
+    Y_UNIT_TEST(TestStorageLoadWriteOnlyRuns) {
+        TTetsEnv env;
+        auto result = env.RunStorageLoad(env.MakeWriteOnlyStorageLoadConfig(), false, 20, 0);
+        UNIT_ASSERT_C(result.PutRequests > 10, "expected write-only load to send put requests");
+    }
+
+    Y_UNIT_TEST(TestStorageLoadReadOnlyRuns) {
+        TTetsEnv env;
+        auto result = env.RunStorageLoad(env.MakeReadOnlyStorageLoadConfig(), false, 1, 20);
+        UNIT_ASSERT_C(result.PutRequests > 0, "expected initial allocation puts in read-only load");
+        UNIT_ASSERT_C(result.GetRequests > 10, "expected read-only load to send get requests");
     }
 
     Y_UNIT_TEST(TestStorageLoad) {
