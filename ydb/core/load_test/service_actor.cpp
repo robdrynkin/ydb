@@ -164,6 +164,167 @@ NJson::TJsonValue AggregatedResultToJson(const TAggregatedResult& result) {
 
 using namespace NActors;
 
+class TStorageLoadInstancesActor : public TActorBootstrapped<TStorageLoadInstancesActor> {
+    NKikimr::TEvLoadTestRequest::TStorageLoad Cmd;
+    const TActorId Parent;
+    TIntrusivePtr<::NMonitoring::TDynamicCounters> Counters;
+    const ui64 Tag;
+    const ui32 Instances;
+
+    THashSet<TActorId> RunningInstances;
+    ui32 FinishedInstances = 0;
+    ui32 FailedInstances = 0;
+    bool Stopping = false;
+    bool CompletionSent = false;
+
+    TIntrusivePtr<TEvLoad::TLoadReport> FirstSuccessfulReport;
+    NJson::TJsonValue FirstJsonResult;
+    TString FirstLastHtmlPage;
+    TString FailureReason;
+
+    static ui64 MakeInstanceTag(ui64 tag, ui32 instanceIdx, ui32 instances) {
+        if (instances <= 1) {
+            return tag;
+        }
+        return (tag << 32) ^ (static_cast<ui64>(instanceIdx) + 1);
+    }
+
+    void StartInstances(const TActorContext& ctx) {
+        for (ui32 instanceIdx = 0; instanceIdx < Instances; ++instanceIdx) {
+            auto instanceCounters = Counters->GetSubgroup("instance", ToString(instanceIdx));
+            const ui64 instanceTag = MakeInstanceTag(Tag, instanceIdx, Instances);
+            const TActorId actorId = ctx.Register(CreateWriterLoadTest(Cmd, SelfId(), instanceCounters, instanceTag));
+            RunningInstances.insert(actorId);
+        }
+
+        if (RunningInstances.empty()) {
+            Finish(ctx);
+        }
+    }
+
+    void Finish(const TActorContext& ctx) {
+        if (CompletionSent) {
+            return;
+        }
+        CompletionSent = true;
+
+        const bool success = FailedInstances == 0 && FirstSuccessfulReport;
+        TString reason;
+        if (success) {
+            reason = TStringBuilder() << "Storage load instances finished successfully, finished# "
+                << FinishedInstances << "/" << Instances;
+        } else {
+            reason = FailureReason
+                ? FailureReason
+                : TStringBuilder() << "Storage load instances failed, failed# " << FailedInstances
+                    << "/" << Instances;
+        }
+
+        auto *finishEv = new TEvLoad::TEvLoadTestFinished(Tag, success ? FirstSuccessfulReport : nullptr, reason);
+        finishEv->LastHtmlPage = FirstLastHtmlPage;
+        finishEv->JsonResult = FirstJsonResult;
+        ctx.Send(Parent, finishEv);
+        Die(ctx);
+    }
+
+public:
+    TStorageLoadInstancesActor(const NKikimr::TEvLoadTestRequest::TStorageLoad& cmd,
+            const TActorId& parent, const TIntrusivePtr<::NMonitoring::TDynamicCounters>& counters, ui64 tag)
+        : Cmd(cmd)
+        , Parent(parent)
+        , Counters(counters)
+        , Tag(tag)
+        , Instances(cmd.GetInstances() ? cmd.GetInstances() : 1u)
+    {}
+
+    void Bootstrap(const TActorContext& ctx) {
+        Become(&TStorageLoadInstancesActor::StateFunc);
+        StartInstances(ctx);
+    }
+
+    void Handle(TEvLoad::TEvLoadTestFinished::TPtr& ev, const TActorContext& ctx) {
+        if (CompletionSent) {
+            return;
+        }
+
+        if (!RunningInstances.erase(ev->Sender)) {
+            LOG_E("Received unexpected TEvLoadTestFinished from actor# " << ev->Sender.ToString()
+                << " for storage load tag# " << Tag);
+            return;
+        }
+
+        ++FinishedInstances;
+        const auto *msg = ev->Get();
+
+        if (msg->Report) {
+            if (!FirstSuccessfulReport) {
+                FirstSuccessfulReport = msg->Report;
+                FirstJsonResult = msg->JsonResult;
+                FirstLastHtmlPage = msg->LastHtmlPage;
+            }
+        } else {
+            ++FailedInstances;
+            if (!FailureReason) {
+                FailureReason = msg->ErrorReason;
+            } else {
+                FailureReason = TStringBuilder() << FailureReason << "; " << msg->ErrorReason;
+            }
+        }
+
+        if (RunningInstances.empty()) {
+            Finish(ctx);
+        }
+    }
+
+    void HandlePoison(const TActorContext& ctx) {
+        if (Stopping) {
+            return;
+        }
+        Stopping = true;
+
+        for (const TActorId& actorId : RunningInstances) {
+            ctx.Send(actorId, new TEvents::TEvPoisonPill);
+        }
+
+        if (RunningInstances.empty()) {
+            Finish(ctx);
+        }
+    }
+
+    void Handle(NMon::TEvHttpInfo::TPtr& ev, const TActorContext& ctx) {
+        TStringStream str;
+        HTML(str) {
+            TABLE_CLASS("table table-condensed") {
+                TABLEBODY() {
+                    TABLER() {
+                        TABLED() { str << "Instances"; }
+                        TABLED() { str << Instances; }
+                    }
+                    TABLER() {
+                        TABLED() { str << "Finished"; }
+                        TABLED() { str << FinishedInstances; }
+                    }
+                    TABLER() {
+                        TABLED() { str << "Failed"; }
+                        TABLED() { str << FailedInstances; }
+                    }
+                    TABLER() {
+                        TABLED() { str << "Running"; }
+                        TABLED() { str << RunningInstances.size(); }
+                    }
+                }
+            }
+        }
+        ctx.Send(ev->Sender, new NMon::TEvHttpInfoRes(str.Str(), ev->Get()->SubRequestId));
+    }
+
+    STRICT_STFUNC(StateFunc,
+        HFunc(TEvLoad::TEvLoadTestFinished, Handle)
+        HFunc(NMon::TEvHttpInfo, Handle)
+        CFunc(TEvents::TSystem::PoisonPill, HandlePoison)
+    )
+};
+
 class TLoadActor : public TActorBootstrapped<TLoadActor> {
     // per-actor HTTP info
     struct TActorInfo {
@@ -501,9 +662,20 @@ public:
                 if (LoadActors.count(tag) != 0) {
                     ythrow TLoadActorException() << Sprintf("duplicate load actor with Tag# %" PRIu64, tag);
                 }
+                if (cmd.GetInstances() == 0) {
+                    ythrow TLoadActorException() << "StorageLoad.Instances must be greater than zero";
+                }
                 LOG_D("Create new load actor with tag# " << tag);
-                LoadActors.emplace(tag, TlsActivationContext->Register(CreateWriterLoadTest(cmd, SelfId(),
-                                GetServiceCounters(Counters, "load_actor"), tag)));
+                auto actorCounters = GetServiceCounters(Counters, "load_actor");
+                if (cmd.GetInstances() == 1) {
+                    LoadActors.emplace(tag, TlsActivationContext->Register(
+                        CreateWriterLoadTest(cmd, SelfId(), actorCounters, tag)));
+                } else {
+                    LOG_N("Create storage load instances actor with tag# " << tag
+                        << " instances# " << cmd.GetInstances());
+                    LoadActors.emplace(tag, TlsActivationContext->Register(
+                        new TStorageLoadInstancesActor(cmd, SelfId(), actorCounters, tag)));
+                }
                 break;
             }
 
