@@ -4,11 +4,41 @@
 
 #include <ydb/core/base/blobstorage_grouptype.h>
 
+#include <cctype>
+
 using namespace NKikimrServices;
 
 namespace NKikimr {
 
     namespace NSyncLog {
+
+        namespace {
+
+            TMaybe<ui32> ExtractChunkIdxFromDeleteError(const TString& errorReason) {
+                constexpr TStringBuf marker = "Can't delete chunkIdx# ";
+                const TStringBuf reason(errorReason);
+                const size_t pos = reason.find(marker);
+                if (pos == TStringBuf::npos) {
+                    return Nothing();
+                }
+
+                size_t begin = pos + marker.size();
+                size_t end = begin;
+                while (end < reason.size() && std::isdigit(static_cast<unsigned char>(reason[end]))) {
+                    ++end;
+                }
+                if (begin == end) {
+                    return Nothing();
+                }
+
+                ui32 chunkIdx = 0;
+                if (!TryFromString(reason.substr(begin, end - begin), chunkIdx)) {
+                    return Nothing();
+                }
+                return chunkIdx;
+            }
+
+        } // namespace
 
         ////////////////////////////////////////////////////////////////////////////
         // TSyncLogCommitterActor
@@ -145,7 +175,28 @@ namespace NKikimr {
             }
 
             void Handle(NPDisk::TEvLogResult::TPtr &ev, const TActorContext &ctx) {
-                CHECK_PDISK_RESPONSE(SlCtx->VCtx, ev, ctx);
+                const auto *msg = ev->Get();
+                if (msg->Status != NKikimrProto::OK) {
+                    if (msg->Status == NKikimrProto::ERROR) {
+                        if (const auto chunkIdx = ExtractChunkIdxFromDeleteError(msg->ErrorReason)) {
+                            auto it = Find(CommitRecord.DeleteChunks, *chunkIdx);
+                            if (it != CommitRecord.DeleteChunks.end()) {
+                                LOG_ERROR(ctx, BS_SYNCLOG,
+                                    VDISKP(SlCtx->VCtx->VDiskLogPrefix,
+                                        "COMMITTER: retrying TEvLog without undeletable chunk; "
+                                        "chunkIdx# %" PRIu32 " ErrorReason# %s DeleteChunks# %s",
+                                        *chunkIdx, msg->ErrorReason.data(),
+                                        FormatList(CommitRecord.DeleteChunks).data()));
+                                CommitRecord.DeleteChunks.erase(it);
+                                GenerateCommit(ctx);
+                                return;
+                            }
+                        }
+                    }
+
+                    CHECK_PDISK_RESPONSE(SlCtx->VCtx, ev, ctx);
+                }
+
                 Y_ABORT_UNLESS(ev->Get()->Results.size() == 1);
                 const ui64 entryPointLsn = ev->Get()->Results[0].Lsn;
                 TCommitHistory commitHistory(TAppData::TimeProvider->Now(), entryPointLsn, EntryPointSerializer.RecoveryLogConfirmedLsn);
