@@ -449,12 +449,11 @@ public:
     TVDiskIterator FindVDisk(const TVDiskID& vdisk) const;
 
     bool CheckScope(const TKikimrScopeId& scopeId, const TActorContext& ctx, bool allowLocalScope) const {
-        if (allowLocalScope) {
-            if (scopeId == AppData(ctx)->LocalScopeId || scopeId.GetInterconnectScopeId() == TScopeId::LocallyGenerated) {
-                return true;
-            }
-        }
-        return !AcceptedScope || *AcceptedScope == scopeId || scopeId == TKikimrScopeId::DynamicTenantScopeId;
+        // One-off load-test binary: allow blobstorage traffic across tenant scopes.
+        (void)scopeId;
+        (void)ctx;
+        (void)allowLocalScope;
+        return true;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

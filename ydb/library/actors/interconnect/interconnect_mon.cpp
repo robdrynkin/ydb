@@ -5,6 +5,8 @@
 #include <library/cpp/json/json_writer.h>
 #include <library/cpp/monlib/service/pages/templates.h>
 
+#include <util/random/random.h>
+
 #include <openssl/ssl.h>
 #include <openssl/pem.h>
 
@@ -13,10 +15,26 @@ namespace NInterconnect {
     using namespace NActors;
 
     class TInterconnectMonActor : public TActor<TInterconnectMonActor> {
+        enum {
+            EvConnectNodes = EventSpaceBegin(TEvents::ES_PRIVATE),
+        };
+
+        struct TEvConnectNodes : TEventLocal<TEvConnectNodes, EvConnectNodes> {
+            TVector<ui32> NodeIds;
+
+            explicit TEvConnectNodes(TVector<ui32>&& nodeIds)
+                : NodeIds(std::move(nodeIds))
+            {}
+        };
+
         class TQueryProcessor : public TActorBootstrapped<TQueryProcessor> {
             const TActorId Sender;
+            const TActorId Owner;
             const bool Json;
+            const bool ConnectMissingStorageNodes;
+            TMap<ui32, bool> StaticNodes;
             TMap<ui32, TInterconnectProxyTCP::TProxyStats> Stats;
+            TVector<ui32> ConnectionRequests;
             ui32 PendingReplies = 0;
 
         public:
@@ -24,9 +42,11 @@ namespace NInterconnect {
                 return EActivityType::INTERCONNECT_MONACTOR;
             }
 
-            TQueryProcessor(const TActorId& sender, bool json)
+            TQueryProcessor(const TActorId& sender, const TActorId& owner, bool json, bool connectMissingStorageNodes)
                 : Sender(sender)
+                , Owner(owner)
                 , Json(json)
+                , ConnectMissingStorageNodes(connectMissingStorageNodes)
             {}
 
             void Bootstrap(const TActorContext& ctx) {
@@ -37,6 +57,9 @@ namespace NInterconnect {
             void Handle(TEvInterconnect::TEvNodesInfo::TPtr ev, const TActorContext& ctx) {
                 TActorSystem* const as = ctx.ActorSystem();
                 for (const auto& node : ev->Get()->Nodes) {
+                    if (node.NodeId != ctx.SelfID.NodeId() && node.IsStatic) {
+                        StaticNodes[node.NodeId] = true;
+                    }
                     Send(as->InterconnectProxy(node.NodeId), new TInterconnectProxyTCP::TEvQueryStats, IEventHandle::FlagTrackDelivery);
                     ++PendingReplies;
                 }
@@ -69,6 +92,17 @@ namespace NInterconnect {
 
             void GenerateResultWhenReady(const TActorContext& ctx) {
                 if (!PendingReplies) {
+                    if (ConnectMissingStorageNodes) {
+                        for (const auto& [nodeId, _] : StaticNodes) {
+                            const auto it = Stats.find(nodeId);
+                            if (it == Stats.end() || !it->second.Connected) {
+                                ConnectionRequests.push_back(nodeId);
+                            }
+                        }
+                        TVector<ui32> nodeIds = ConnectionRequests;
+                        ctx.Send(Owner, new TEvConnectNodes(std::move(nodeIds)));
+                    }
+
                     if (Json) {
                         ctx.Send(Sender, new NMon::TEvHttpInfoRes(GenerateJson(), 0, NMon::IEvHttpInfoRes::EContentType::Custom));
                     } else {
@@ -97,6 +131,33 @@ namespace NInterconnect {
             TString GenerateHtml() {
                 TStringStream str;
                 HTML(str) {
+                    DIV_CLASS("panel panel-info") {
+                        DIV_CLASS("panel-heading") {
+                            str << "Actions";
+                        }
+                        DIV_CLASS("panel-body") {
+                            str << "<a class='btn btn-default' href='?connect_storage_nodes=1'>"
+                                << "Connect missing storage nodes"
+                                << "</a>";
+                            if (ConnectMissingStorageNodes) {
+                                str << "<p style='margin-top: 10px'>";
+                                str << "Connection requests sent to " << ConnectionRequests.size() << " storage node";
+                                if (ConnectionRequests.size() != 1) {
+                                    str << "s";
+                                }
+                                if (!ConnectionRequests.empty()) {
+                                    str << ": ";
+                                    for (ui32 i = 0; i < ConnectionRequests.size(); ++i) {
+                                        if (i) {
+                                            str << ", ";
+                                        }
+                                        str << ConnectionRequests[i];
+                                    }
+                                }
+                                str << "</p>";
+                            }
+                        }
+                    }
                     TABLE_CLASS("table-sortable table") {
                         TABLEHEAD() {
                             TABLER() {
@@ -196,6 +257,13 @@ namespace NInterconnect {
 
                     json[ToString(nodeId)] = item;
                 }
+                if (ConnectMissingStorageNodes) {
+                    NJson::TJsonValue requested(NJson::JSON_ARRAY);
+                    for (ui32 nodeId : ConnectionRequests) {
+                        requested.AppendValue(nodeId);
+                    }
+                    json["ConnectMissingStorageNodesRequested"] = requested;
+                }
                 TStringStream str(NMonitoring::HTTPOKJSON);
                 NJson::WriteJson(&str, &json);
                 return str.Str();
@@ -217,6 +285,9 @@ namespace NInterconnect {
 
         STRICT_STFUNC(StateFunc,
             HFunc(NMon::TEvHttpInfo, Handle)
+            HFunc(TEvConnectNodes, Handle)
+            HFunc(TEvInterconnect::TEvNodeConnected, Handle)
+            HFunc(TEvInterconnect::TEvNodeDisconnected, Handle)
         )
 
         void Handle(NMon::TEvHttpInfo::TPtr& ev, const TActorContext& ctx) {
@@ -227,8 +298,29 @@ namespace NInterconnect {
                     NMon::TEvHttpInfoRes::Custom));
             } else {
                 const bool json = params.Has("fmt") && params.Get("fmt") == "json";
-                ctx.Register(new TQueryProcessor(ev->Sender, json));
+                const bool connectMissingStorageNodes = params.Has("connect_storage_nodes");
+                ctx.Register(new TQueryProcessor(ev->Sender, ctx.SelfID, json, connectMissingStorageNodes));
             }
+        }
+
+        void Handle(TEvConnectNodes::TPtr& ev, const TActorContext& ctx) {
+            for (ui32 nodeId : ev->Get()->NodeIds) {
+                if (const TActorId proxy = ctx.ActorSystem()->InterconnectProxy(nodeId)) {
+                    ctx.Schedule(RandomConnectDelay(), std::make_unique<IEventHandle>(
+                        proxy, ctx.SelfID, new TEvInterconnect::TEvConnectNode));
+                }
+            }
+        }
+
+        static TDuration RandomConnectDelay() {
+            const ui64 maxDelay = TDuration::Seconds(30).GetValue();
+            return TDuration::FromValue(RandomNumber<ui64>(maxDelay + 1));
+        }
+
+        void Handle(TEvInterconnect::TEvNodeConnected::TPtr&, const TActorContext&) {
+        }
+
+        void Handle(TEvInterconnect::TEvNodeDisconnected::TPtr&, const TActorContext&) {
         }
 
         TString GetCertInfoJson() const {
