@@ -944,6 +944,28 @@ class TLogWriterLoadTestActor : public TActorBootstrapped<TLogWriterLoadTestActo
 #undef DUMP_PARAM_FINAL
         }
 
+        ui64 GetTotalBytesWritten() const {
+            return TotalBytesWritten;
+        }
+
+        ui64 GetTotalBytesRead() const {
+            return TotalBytesRead;
+        }
+
+        ui64 GetOkPutResults() const {
+            return OkPutResults;
+        }
+
+        ui64 GetBadPutResults() const {
+            return BadPutResults;
+        }
+
+        double GetMaxResponseTimeMs(float percentile) const {
+            const double writeMs = ResponseQT->GetPercentile(percentile) / 1000.0;
+            const double readMs = ReadResponseQT->GetPercentile(percentile) / 1000.0;
+            return Max(writeMs, readMs);
+        }
+
     private:
         void UpdateNextWakeups(const TActorContext& ctx, const TMonotonic& now) {
             if (now < NextWriteTimestamp && !NextWriteInQueue) {
@@ -1497,6 +1519,7 @@ public:
 
         auto* finishEv = new TEvLoad::TEvLoadTestFinished(Tag, report, errorReason);
         finishEv->LastHtmlPage = RenderHTML(true);
+        finishEv->JsonResult = GetJsonResult();
         ctx.Send(Parent, finishEv);
         Die(ctx);
     }
@@ -1614,6 +1637,48 @@ public:
             }
         }
         return str.Str();
+    }
+
+    NJson::TJsonValue GetJsonResult() const {
+        ui64 totalBytesWritten = 0;
+        ui64 totalBytesRead = 0;
+        ui64 okPutResults = 0;
+        ui64 badPutResults = 0;
+
+        for (const auto& writer : TabletWriters) {
+            totalBytesWritten += writer->GetTotalBytesWritten();
+            totalBytesRead += writer->GetTotalBytesRead();
+            okPutResults += writer->GetOkPutResults();
+            badPutResults += writer->GetBadPutResults();
+        }
+
+        const TDuration elapsed = TestStartTime != TMonotonic()
+            ? TActivationContext::Monotonic() - TestStartTime
+            : TDuration::Zero();
+        const double seconds = Max(1.0, elapsed.SecondsFloat());
+
+        NJson::TJsonValue value;
+        value["txs"] = okPutResults;
+        value["rps"] = okPutResults / seconds;
+        value["errors"] = badPutResults / seconds;
+        value["total_bytes_written"] = totalBytesWritten;
+        value["total_bytes_read"] = totalBytesRead;
+
+        auto& percentiles = value["percentile"];
+        percentiles["50"] = MaxPercentileMs(0.50);
+        percentiles["95"] = MaxPercentileMs(0.95);
+        percentiles["99"] = MaxPercentileMs(0.99);
+        percentiles["100"] = MaxPercentileMs(1.00);
+
+        return value;
+    }
+
+    double MaxPercentileMs(float percentile) const {
+        double value = 0.0;
+        for (const auto& writer : TabletWriters) {
+            value = Max(value, writer->GetMaxResponseTimeMs(percentile));
+        }
+        return value;
     }
 
     void Handle(NMon::TEvHttpInfo::TPtr& ev, const TActorContext& ctx) {

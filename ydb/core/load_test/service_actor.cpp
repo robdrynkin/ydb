@@ -140,6 +140,28 @@ NJson::TJsonValue AggregatedResultToJson(const TAggregatedResult& result) {
     return value;
 }
 
+ui64 GetJsonUInteger(const NJson::TJsonValue& value, const TString& name) {
+    return value.Has(name) ? value[name].GetUInteger() : 0;
+}
+
+ui64 ExtractFinalHtmlCounter(const TString& html, const TString& name) {
+    const TString marker = TStringBuilder() << "<td>" << name << "</td><td>";
+    const size_t markerPos = html.find(marker);
+    if (markerPos == TString::npos) {
+        return 0;
+    }
+
+    const size_t valueStart = markerPos + marker.size();
+    const size_t valueEnd = html.find("</td>", valueStart);
+    if (valueEnd == TString::npos) {
+        return 0;
+    }
+
+    ui64 value = 0;
+    TryFromString(html.substr(valueStart, valueEnd - valueStart), value);
+    return value;
+}
+
 }  // anonymous namespace
 
 using namespace NActors;
@@ -191,6 +213,20 @@ class TLoadActor : public TActorBootstrapped<TLoadActor> {
         ui32 FinishedCount;
         ui32 FailedCount;
         THashMap<ui32, TEvNodeFinishResponse> NodeResponses;  // key is node id
+    };
+
+    struct TLightResult {
+        TString Uuid;
+        ui64 Tag = 0;
+        TInstant Start = TInstant::Zero();
+        TInstant Finish = TInstant::Zero();
+        bool Finished = false;
+        ui32 StartedNodes = 0;
+        ui32 FinishedNodes = 0;
+        ui32 FailedNodes = 0;
+        ui64 TotalBytesWritten = 0;
+        ui64 TotalBytesRead = 0;
+        TAggregatedStats Stats;
     };
 
     TVector<TConfigExample> ConfigExamples;
@@ -769,10 +805,18 @@ public:
     void HandleGet(const NMonitoring::IMonHttpRequest& request, THttpInfoRequest& info, ui32 id) {
         const auto& params = request.GetParams();
         TString mode = params.Has("mode") ? params.Get("mode") : "start";
+        const bool lightResult = params.Has("light") && params.Get("light") == "1";
+        if (mode == "result") {
+            mode = "results";
+        }
         info.Mode = mode;
         LOG_N("handle http GET request, mode: " << mode << " LoadActors.size(): " << LoadActors.size());
 
         if (mode == "results") {
+            if (lightResult) {
+                GenerateLightHttpInfoRes(id);
+                return;
+            }
             if (IsJsonContentType(info.AcceptFormat)) {
                 GenerateJsonInfoRes(id);
                 return;
@@ -1031,6 +1075,190 @@ public:
                 NMon::IEvHttpInfoRes::EContentType::Custom);
         Send(info.Origin, result.release());
 
+        InfoRequests.erase(it);
+    }
+
+    TLightResult BuildLightResult(const TString& uuid) const {
+        TLightResult result;
+        result.Uuid = uuid;
+
+        auto requestIt = RequestsInProcessing.find(uuid);
+        if (requestIt != RequestsInProcessing.end()) {
+            const TEvLoadTestRequest& request = requestIt->second;
+            result.Tag = request.GetTag();
+            result.Start = TInstant::Seconds(request.GetTimestamp());
+        }
+
+        auto statusIt = RequestStatus.find(uuid);
+        if (statusIt == RequestStatus.end()) {
+            return result;
+        }
+
+        const TRequestStatus& status = statusIt->second;
+        result.StartedNodes = status.StartedCount;
+        result.FinishedNodes = status.FinishedCount;
+        result.FailedNodes = status.FailedCount;
+        result.Finished = status.StartedCount > 0 && status.FinishedCount + status.FailedCount >= status.StartedCount;
+
+        TStatsAggregator aggregator(status.StartedCount);
+        ui64 latestFinish = 0;
+        for (const auto& [_, node] : status.NodeResponses) {
+            if (node.GetSuccess() && node.HasStats()) {
+                aggregator.Add(node.GetStats());
+            }
+            latestFinish = Max(latestFinish, node.GetFinishTimestamp());
+
+            NJson::TJsonValue jsonResult;
+            if (NJson::ReadJsonTree(node.GetJsonResult(), &jsonResult, true) &&
+                    (jsonResult.Has("total_bytes_written") || jsonResult.Has("total_bytes_read"))) {
+                result.TotalBytesWritten += GetJsonUInteger(jsonResult, "total_bytes_written");
+                result.TotalBytesRead += GetJsonUInteger(jsonResult, "total_bytes_read");
+            } else {
+                result.TotalBytesWritten += ExtractFinalHtmlCounter(node.GetLastHtmlPage(), "TotalBytesWritten");
+                result.TotalBytesRead += ExtractFinalHtmlCounter(node.GetLastHtmlPage(), "TotalBytesRead");
+            }
+        }
+        result.Finish = TInstant::Seconds(latestFinish);
+        result.Stats = aggregator.Get();
+        return result;
+    }
+
+    TVector<TLightResult> BuildLightResults() const {
+        TVector<TLightResult> results;
+        THashSet<TString> seen;
+
+        for (auto it = FinishedTests.rbegin(); it != FinishedTests.rend(); ++it) {
+            results.push_back(BuildLightResult(it->Uuid));
+            seen.insert(it->Uuid);
+        }
+
+        for (const auto& [uuid, _] : RequestsInProcessing) {
+            if (!seen.contains(uuid)) {
+                results.push_back(BuildLightResult(uuid));
+            }
+        }
+
+        return results;
+    }
+
+    NJson::TJsonValue LightResultToJson(const TLightResult& result) const {
+        NJson::TJsonValue value;
+        value["uuid"] = result.Uuid;
+        value["tag"] = result.Tag;
+        value["state"] = !result.Finished ? "running" : (result.FailedNodes ? "completed_with_failures" : "completed");
+        value["start"] = result.Start.ToStringUpToSeconds();
+        value["finish"] = result.Finish != TInstant::Zero() ? result.Finish.ToStringUpToSeconds() : "";
+        value["started_nodes"] = result.StartedNodes;
+        value["finished_nodes"] = result.FinishedNodes;
+        value["failed_nodes"] = result.FailedNodes;
+        value["total_nodes"] = result.Stats.TotalNodes;
+        value["success_nodes"] = result.Stats.SuccessNodes;
+        value["total_bytes_written"] = result.TotalBytesWritten;
+        value["total_bytes_read"] = result.TotalBytesRead;
+        value["transactions"] = AggregatedFieldToJson(result.Stats.Transactions);
+        value["transactions_per_second"] = AggregatedFieldToJson(result.Stats.TransactionsPerSecond);
+        value["errors_per_second"] = AggregatedFieldToJson(result.Stats.ErrorsPerSecond);
+        for (ui32 level : xrange(EPL_COUNT_NUM)) {
+            value["percentile_" + ToString(static_cast<EPercentileLevel>(level))] =
+                AggregatedFieldToJson(result.Stats.Percentiles[level]);
+        }
+        return value;
+    }
+
+    void GenerateLightJsonInfoRes(ui32 id, const TVector<TLightResult>& lightResults) {
+        auto it = InfoRequests.find(id);
+        Y_ABORT_UNLESS(it != InfoRequests.end());
+        THttpInfoRequest& info = it->second;
+
+        NJson::TJsonValue value;
+        value["version"] = 1;
+        NJson::TJsonArray runs;
+        for (const TLightResult& result : lightResults) {
+            runs.AppendValue(LightResultToJson(result));
+        }
+        value["runs"] = runs;
+
+        TStringStream str;
+        str << NMonitoring::HTTPOKJSON;
+        NJson::WriteJson(&str, &value);
+
+        auto response = std::make_unique<NMon::TEvHttpInfoRes>(str.Str(), info.SubRequestId,
+                NMon::IEvHttpInfoRes::EContentType::Custom);
+        Send(info.Origin, response.release());
+
+        InfoRequests.erase(it);
+    }
+
+    void GenerateLightHttpInfoRes(ui32 id) {
+        auto it = InfoRequests.find(id);
+        Y_ABORT_UNLESS(it != InfoRequests.end());
+        THttpInfoRequest& info = it->second;
+
+        const TVector<TLightResult> lightResults = BuildLightResults();
+        if (IsJsonContentType(info.AcceptFormat)) {
+            GenerateLightJsonInfoRes(id, lightResults);
+            return;
+        }
+
+        TStringStream str;
+        HTML(str) {
+            TABLE_CLASS("table-bordered table-condensed") {
+                TABLEHEAD() {
+                    TABLER() {
+                        TABLEH() { str << "UUID"; }
+                        TABLEH() { str << "State"; }
+                        TABLEH() { str << "Start"; }
+                        TABLEH() { str << "Finish"; }
+                        TABLEH() { str << "Ok / nodes"; }
+                        TABLEH() { str << "Bytes written"; }
+                        TABLEH() { str << "Bytes read"; }
+                        TABLEH() { str << "Txs"; }
+                        TABLEH() { str << "Txs/Sec"; }
+                        TABLEH() { str << "Errors/Sec"; }
+                        for (ui32 level : xrange(EPL_COUNT_NUM)) {
+                            TABLEH() {
+                                str << "p";
+                                if (level == EPL_100) {
+                                    str << "Max";
+                                } else {
+                                    str << ToString(static_cast<EPercentileLevel>(level));
+                                }
+                                str << "(ms)";
+                            }
+                        }
+                    }
+                }
+                TABLEBODY() {
+                    for (const TLightResult& result : lightResults) {
+                        TABLER() {
+                            TABLED() { PrintUuidToHtml(result.Uuid, str); }
+                            TABLED() {
+                                str << (!result.Finished
+                                    ? "running"
+                                    : (result.FailedNodes ? "completed_with_failures" : "completed"));
+                            }
+                            TABLED() { str << result.Start.ToStringUpToSeconds(); }
+                            TABLED() {
+                                if (result.Finish != TInstant::Zero()) {
+                                    str << result.Finish.ToStringUpToSeconds();
+                                }
+                            }
+                            TABLED() { str << result.Stats.SuccessNodes << " / " << result.Stats.TotalNodes; }
+                            TABLED() { str << result.TotalBytesWritten; }
+                            TABLED() { str << result.TotalBytesRead; }
+                            TABLED() { PrintFieldToHtml(result.Stats.Transactions, str); }
+                            TABLED() { PrintFieldToHtml(result.Stats.TransactionsPerSecond, str); }
+                            TABLED() { PrintFieldToHtml(result.Stats.ErrorsPerSecond, str); }
+                            for (ui32 level : xrange(EPL_COUNT_NUM)) {
+                                TABLED() { PrintFieldToHtml(result.Stats.Percentiles[level], str); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Send(info.Origin, new NMon::TEvHttpInfoRes(str.Str(), info.SubRequestId));
         InfoRequests.erase(it);
     }
 
