@@ -107,6 +107,7 @@ message TEvLoadTestRequest {
         repeated TPerTabletProfile Tablets = 4;
         reserved 5; // (deprecated) optional uint64 ScheduleThresholdUs = 5;
         reserved 6; // (deprecated) optional uint64 ScheduleRoundingUs = 6;
+        optional uint32 Instances = 7 [default = 1];
     }
     message TStop {
         optional uint64 Tag = 1;

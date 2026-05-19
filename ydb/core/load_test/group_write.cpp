@@ -1563,7 +1563,7 @@ public:
         for (auto& writer : TabletWriters) {
             writer->Bootstrap(ctx);
         }
-        HandleUpdateQuantile(ctx);
+        // HandleUpdateQuantile(ctx);
         NextWriteTimestamp = TActivationContext::Monotonic();
         NextReadTimestamp = TActivationContext::Monotonic();
         // Cerr << "bootstrap" << Endl;

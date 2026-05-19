@@ -162,6 +162,13 @@ ui64 ExtractFinalHtmlCounter(const TString& html, const TString& name) {
     return value;
 }
 
+ui32 GetLoadInstances(const TEvLoadTestRequest& request) {
+    if (request.HasStorageLoad()) {
+        return Max<ui32>(request.GetStorageLoad().GetInstances(), 1);
+    }
+    return 1;
+}
+
 }  // anonymous namespace
 
 using namespace NActors;
@@ -227,6 +234,11 @@ class TLoadActor : public TActorBootstrapped<TLoadActor> {
         ui64 TotalBytesWritten = 0;
         ui64 TotalBytesRead = 0;
         TAggregatedStats Stats;
+    };
+
+    struct TStartedLoadInfo {
+        ui64 Tag = 0;
+        TString Uuid;
     };
 
     TVector<TConfigExample> ConfigExamples;
@@ -888,20 +900,37 @@ public:
 
             ui64 tag = 0;
             TString uuid;
+            TVector<TStartedLoadInfo> startedLoads;
             if (record) {
-                if (params.Has("all_nodes") && params.Get("all_nodes") == "true") {
-                    LOG_N("running on all nodes");
-                    RunRecordOnAllNodes(*record, tag, uuid, errorMsg);
-                } else {
-                    try {
-                        LOG_N("running on single node");
-                        const auto& modifiedRequest = AddRequestInProcessing(record.value(), /* legacyRequest */ false);
-                        tag = modifiedRequest.GetTag();
-                        uuid = modifiedRequest.GetUuid();
-                        const TVector<ui32> dynNodesIds = {SelfId().NodeId()};
-                        SendLoadTestRequestToNodes(modifiedRequest, dynNodesIds);
-                    } catch (const TLoadActorException& ex) {
-                        errorMsg = ex.what();
+                const ui32 instances = GetLoadInstances(*record);
+                const bool allNodes = params.Has("all_nodes") && params.Get("all_nodes") == "true";
+                LOG_N("starting " << instances << " load instance(s) on " << (allNodes ? "all nodes" : "single node"));
+                for (ui32 instance = 0; instance < instances; ++instance) {
+                    ui64 currentTag = 0;
+                    TString currentUuid;
+                    if (allNodes) {
+                        LOG_N("running on all nodes");
+                        RunRecordOnAllNodes(*record, currentTag, currentUuid, errorMsg);
+                    } else {
+                        try {
+                            LOG_N("running on single node");
+                            const auto& modifiedRequest = AddRequestInProcessing(record.value(), /* legacyRequest */ false);
+                            currentTag = modifiedRequest.GetTag();
+                            currentUuid = modifiedRequest.GetUuid();
+                            const TVector<ui32> dynNodesIds = {SelfId().NodeId()};
+                            SendLoadTestRequestToNodes(modifiedRequest, dynNodesIds);
+                        } catch (const TLoadActorException& ex) {
+                            errorMsg = ex.what();
+                            break;
+                        }
+                    }
+                    startedLoads.push_back(TStartedLoadInfo{
+                        .Tag = currentTag,
+                        .Uuid = std::move(currentUuid),
+                    });
+                    if (!tag) {
+                        tag = currentTag;
+                        uuid = startedLoads.back().Uuid;
                     }
                 }
             } else {
@@ -909,7 +938,7 @@ public:
                 LOG_E(errorMsg);
             }
 
-            GenerateJsonTagInfoRes(id, tag, uuid, errorMsg);
+            GenerateJsonTagInfoRes(id, tag, uuid, errorMsg, startedLoads);
         } else if (mode = "stop") {
             auto record = ParseMessage<NKikimr::TEvLoadTestRequest::TStop>(request, content);
             if (!record) {
@@ -1016,7 +1045,12 @@ public:
         }
     }
 
-    void GenerateJsonTagInfoRes(ui32 id, ui64 tag, TString uuid, TString errorMsg) {
+    void GenerateJsonTagInfoRes(
+            ui32 id,
+            ui64 tag,
+            TString uuid,
+            TString errorMsg,
+            TConstArrayRef<TStartedLoadInfo> startedLoads = {}) {
         auto it = InfoRequests.find(id);
         Y_ABORT_UNLESS(it != InfoRequests.end());
         THttpInfoRequest& info = it->second;
@@ -1029,6 +1063,17 @@ public:
         }
         value["uuid"] = std::move(uuid);
         value["status"] = std::move(errorMsg);
+        if (startedLoads.size() > 1) {
+            value["instances"] = startedLoads.size();
+            NJson::TJsonArray runs;
+            for (const TStartedLoadInfo& startedLoad : startedLoads) {
+                NJson::TJsonValue run;
+                run["tag"] = startedLoad.Tag;
+                run["uuid"] = startedLoad.Uuid;
+                runs.AppendValue(run);
+            }
+            value["runs"] = runs;
+        }
         NJson::WriteJson(&str, &value);
 
         auto result = std::make_unique<NMon::TEvHttpInfoRes>(str.Str(), info.SubRequestId,
