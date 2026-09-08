@@ -259,6 +259,8 @@ struct TErasureType {
         Erasure3Plus3Block = 12,
 
         ErasureMirror3of4 = 18,
+
+        Erasure8Plus2Block = 19,
     };
 
     static const char *ErasureSpeciesToStr(EErasureSpecies es);
@@ -328,6 +330,7 @@ struct TErasureType {
     ui64 PartSize(ECrcMode crcMode, ui64 dataSize) const;
     ui64 SuggestDataSize(ECrcMode crcMode, ui64 partSize, bool roundDown) const;
     ui32 Prime() const;
+    ui32 ColumnSize() const;
 
     void SplitData(ECrcMode crcMode, TRope& buffer, TDataPartSet& outPartSet) const;
     void SplitData(ECrcMode crcMode, const TString& buffer, TDataPartSet& outPartSet) const {
@@ -367,7 +370,6 @@ struct TErasureType {
 protected:
     EErasureSpecies ErasureSpecies;
 
-    ui32 ColumnSize() const;
 };
 
 bool CheckCrcAtTheEnd(TErasureType::ECrcMode crcMode, const TContiguousSpan& buf);

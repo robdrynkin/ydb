@@ -44,6 +44,7 @@ ui32 GetHandoff(TErasureType::EErasureSpecies species) {
         ,{TErasureType::EErasureSpecies::Erasure4Plus3Block,  {3}}
         ,{TErasureType::EErasureSpecies::Erasure3Plus3Block,  {3}}
         ,{TErasureType::EErasureSpecies::ErasureMirror3of4,   {5}}
+        ,{TErasureType::EErasureSpecies::Erasure8Plus2Block,  {2}}
     }};
     return blobStorageGroupErasureSpeciesParameters.at(species).Handoff;
 }

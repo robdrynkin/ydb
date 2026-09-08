@@ -1,4 +1,5 @@
 #include "erasure.h"
+#include "erasure_block82.h"
 
 #include <util/generic/yexception.h>
 #include <util/system/unaligned_mem.h>
@@ -65,6 +66,7 @@ const char *TErasureType::ErasureSpeciesToStr(TErasureType::EErasureSpecies es) 
         case Erasure4Plus3Block:    return "4Plus3Block";
         case Erasure3Plus3Block:    return "3Plus3Block";
         case ErasureMirror3of4:     return "ErasureMirror3of4";
+        case Erasure8Plus2Block:    return "8Plus2Block";
         default:                    return "UNKNOWN";
     }
 }
@@ -74,16 +76,18 @@ struct TErasureParameters {
     ui32 DataParts; // for parity - number of data parts, for mirror - 1
     ui32 ParityParts; // for parity - number of parity parts (1 | 2 | 3), for mirror - number of additional copies
     ui32 Prime; // for parity - smallest prime number >= DataParts, for mirror - 1
+    ui32 ColumnSize; // persisted byte geometry, independent of codec arithmetic
 };
 
 const TErasureParameters& GetErasureParameters(TErasureType::EErasureSpecies species) {
-    static constexpr std::array<TErasureParameters, 6> ErasureParameters = {
-        TErasureParameters{TErasureType::ErasureMirror, 1, 0, 1},
-        TErasureParameters{TErasureType::ErasureParityBlock, 4, 2, 5},
-        TErasureParameters{TErasureType::ErasureMirror, 1, 2, 1},
-        TErasureParameters{TErasureType::ErasureParityBlock, 4, 3, 5},
-        TErasureParameters{TErasureType::ErasureParityBlock, 3, 3, 3},
-        TErasureParameters{TErasureType::ErasureMirror, 1, 2, 1}
+    static constexpr std::array<TErasureParameters, 7> ErasureParameters = {
+        TErasureParameters{TErasureType::ErasureMirror, 1, 0, 1, 1},
+        TErasureParameters{TErasureType::ErasureParityBlock, 4, 2, 5, 32},
+        TErasureParameters{TErasureType::ErasureMirror, 1, 2, 1, 1},
+        TErasureParameters{TErasureType::ErasureParityBlock, 4, 3, 5, 32},
+        TErasureParameters{TErasureType::ErasureParityBlock, 3, 3, 3, 16},
+        TErasureParameters{TErasureType::ErasureMirror, 1, 2, 1, 1},
+        TErasureParameters{TErasureType::ErasureParityBlock, 8, 2, 11, 32}
     };
 
     switch (species) {
@@ -99,6 +103,8 @@ const TErasureParameters& GetErasureParameters(TErasureType::EErasureSpecies spe
             return ErasureParameters[4];
         case TErasureType::EErasureSpecies::ErasureMirror3of4:
             return ErasureParameters[5];
+        case TErasureType::EErasureSpecies::Erasure8Plus2Block:
+            return ErasureParameters[6];
     }
 
     Y_ABORT("Unknown erasure species = %d", static_cast<int>(species));
@@ -1961,6 +1967,7 @@ const std::unordered_map<TErasureType::EErasureSpecies, TString> TErasureType::E
     {TErasureType::EErasureSpecies::Erasure4Plus3Block ,"block-4-3"},
     // {TErasureType::EErasureSpecies::Erasure3Plus3Block ,"block-3-3"},
     {TErasureType::EErasureSpecies::ErasureMirror3of4 ,"mirror-3of4"},
+    {TErasureType::EErasureSpecies::Erasure8Plus2Block, "block-8-2"},
 }};
 
 TErasureType::EErasureFamily TErasureType::ErasureFamily() const {
@@ -1989,18 +1996,9 @@ ui32 TErasureType::MinimalRestorablePartCount() const {
 }
 
 ui32 TErasureType::ColumnSize() const {
-    const TErasureParameters& erasure = GetErasureParameters(ErasureSpecies);
-    switch (erasure.ErasureFamily) {
-    case TErasureType::ErasureMirror:
-        return 1;
-    case TErasureType::ErasureParityBlock:
-        if (erasure.ParityParts == 1) {
-            return sizeof(ui64);
-        }
-        return (erasure.Prime - 1) * sizeof(ui64);
-    }
-    ythrow TWithBackTrace<yexception>() << "Unknown ErasureFamily = " << (i32)erasure.ErasureFamily;
+    return GetErasureParameters(ErasureSpecies).ColumnSize;
 }
+
 /*
 ui32 TErasureType::PartialRestoreStep() const {
     const TErasureParameters& erasure = GetErasureParameters(ErasureSpecies);
@@ -2017,24 +2015,8 @@ ui32 TErasureType::PartialRestoreStep() const {
 }*/
 
 ui32 TErasureType::MinimalBlockSize() const {
-    const TErasureParameters& erasure = GetErasureParameters(ErasureSpecies);
-    switch (erasure.ErasureFamily) {
-    case TErasureType::ErasureMirror:
-        return 1;
-    case TErasureType::ErasureParityBlock:
-        if (erasure.ParityParts == 1) {
-            return erasure.DataParts * sizeof(ui64);
-        }
-        if (erasure.ParityParts == 2) {
-            return (erasure.Prime - 1) * erasure.DataParts * sizeof(ui64);
-        }
-        if (erasure.ParityParts == 3) {
-            return (erasure.Prime - 1) * erasure.DataParts * sizeof(ui64);
-        }
-        ythrow TWithBackTrace<yexception>() << "Unsupported partiy part count = " << erasure.ParityParts <<
-                " for ErasureFamily = " << (i32)erasure.ErasureFamily;
-    }
-    ythrow TWithBackTrace<yexception>() << "Unknown ErasureFamily = " << (i32)erasure.ErasureFamily;
+    const auto& erasure = GetErasureParameters(ErasureSpecies);
+    return erasure.DataParts * erasure.ColumnSize;
 }
 
 ui64 TErasureType::PartUserSize(ui64 dataSize) const {
@@ -2046,7 +2028,7 @@ ui64 TErasureType::PartUserSize(ui64 dataSize) const {
         {
             ui32 blockSize = MinimalBlockSize();
             ui64 dataSizeBlocks = (dataSize + blockSize - 1) / blockSize;
-            ui64 partSize = dataSizeBlocks * sizeof(ui64) * (erasure.ParityParts == 1 ? 1 : (erasure.Prime - 1));
+            ui64 partSize = dataSizeBlocks * erasure.ColumnSize;
             return partSize;
         }
     }
@@ -2076,7 +2058,7 @@ ui64 TErasureType::PartSize(ECrcMode crcMode, ui64 dataSize) const {
         {
             ui32 blockSize = MinimalBlockSize();
             ui64 dataSizeBlocks = (dataSize + blockSize - 1) / blockSize;
-            ui64 partSize = dataSizeBlocks * sizeof(ui64) * (erasure.ParityParts == 1 ? 1 : (erasure.Prime - 1));
+            ui64 partSize = dataSizeBlocks * erasure.ColumnSize;
             switch (crcMode) {
             case CrcModeNone:
                 return partSize;
@@ -2583,6 +2565,10 @@ void TErasureType::SplitData(ECrcMode crcMode, TRope& buffer, TDataPartSet& outP
 }
 
 void TErasureType::IncrementalSplitData(ECrcMode crcMode, TRope& buffer, TDataPartSet& outPartSet) const {
+    if (ErasureSpecies == Erasure8Plus2Block) {
+        ErasureSplitBlock82Legacy(crcMode, buffer, outPartSet);
+        return;
+    }
     const TErasureParameters& erasure = GetErasureParameters(ErasureSpecies);
     switch (erasure.ErasureFamily) {
         case TErasureType::ErasureMirror:
@@ -2699,6 +2685,7 @@ void EoBlockSplitDiff(TErasureType::ECrcMode crcMode, const TErasureType &type, 
 }
 
 void TErasureType::SplitDiffs(ECrcMode crcMode, ui32 dataSize, const TVector<TDiff> &diffs, TPartDiffSet& outDiffSet) const {
+    Y_ABORT_UNLESS(ErasureSpecies != Erasure8Plus2Block, "SplitDiffs is unsupported for block-8-2");
     Y_ABORT_UNLESS(crcMode == CrcModeNone, "crc's not implemented");
     const TErasureParameters& erasure = GetErasureParameters(ErasureSpecies);
 
@@ -2782,6 +2769,7 @@ void MakeEoBlockXorDiff(TErasureType::ECrcMode crcMode, const TErasureType &type
 void TErasureType::MakeXorDiff(ECrcMode crcMode, ui32 dataSize, const ui8 *src,
         const TVector<TDiff> &inDiffs, TVector<TDiff> *outDiffs) const
 {
+    Y_ABORT_UNLESS(ErasureSpecies != Erasure8Plus2Block, "MakeXorDiff is unsupported for block-8-2");
     Y_ABORT_UNLESS(crcMode == CrcModeNone, "crc's not implemented");
     const TErasureParameters& erasure = GetErasureParameters(ErasureSpecies);
     switch (erasure.ErasureFamily) {
@@ -2796,6 +2784,7 @@ void TErasureType::MakeXorDiff(ECrcMode crcMode, ui32 dataSize, const ui8 *src,
 }
 
 void TErasureType::ApplyDiff(ECrcMode crcMode, ui8 *dst, const TVector<TDiff> &diffs) const {
+    Y_ABORT_UNLESS(ErasureSpecies != Erasure8Plus2Block, "ApplyDiff is unsupported for block-8-2");
     Y_ABORT_UNLESS(crcMode == CrcModeNone, "crc's not implemented");
     for (auto &diff : diffs) {
         memcpy(dst + diff.Offset, diff.GetDataBegin(), diff.GetDiffLength());
@@ -2915,6 +2904,7 @@ void ApplyEoBlockXorDiffForSecondParityPart(TErasureType::ECrcMode crcMode, cons
 void TErasureType::ApplyXorDiff(ECrcMode crcMode, ui32 dataSize, ui8 *dst,
         const TVector<TDiff> &diffs, ui8 fromPart, ui8 toPart) const
 {
+    Y_ABORT_UNLESS(ErasureSpecies != Erasure8Plus2Block, "ApplyXorDiff is unsupported for block-8-2");
     Y_ABORT_UNLESS(crcMode == CrcModeNone, "crc's not implemented");
     const TErasureParameters& erasure = GetErasureParameters(ErasureSpecies);
     switch (erasure.ErasureFamily) {
@@ -2942,6 +2932,10 @@ void TErasureType::RestoreData(ECrcMode crcMode, TDataPartSet& partSet, TRope& o
 
 void TErasureType::RestoreData(ECrcMode crcMode, TDataPartSet& partSet, bool restoreParts, bool restoreFullData,
         bool restoreParityParts) const {
+    if (ErasureSpecies == Erasure8Plus2Block) {
+        ErasureRestoreBlock82Legacy(crcMode, partSet, restoreParts, restoreFullData, restoreParityParts);
+        return;
+    }
     if (restoreParityParts) {
         restoreParts = true;
     }
