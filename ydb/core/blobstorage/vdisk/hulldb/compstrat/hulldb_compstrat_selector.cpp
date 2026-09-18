@@ -59,7 +59,7 @@ namespace NKikimr {
             }
 
             // try to find what to compact based on levels balance
-            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task).Select(ranks);
+            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task, ranks).Select();
             if (action != ActNothing) {
                 Task->SelectStrategy = Task->IsFullCompaction
                     ? ESelectStrategy::BalanceFull
@@ -116,7 +116,7 @@ namespace NKikimr {
             }
 
             // try to find what to compact based on levels balance
-            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task).Select(ranks);
+            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task, ranks).Select();
             if (action != ActNothing) {
                 Task->SelectStrategy = Task->IsFullCompaction
                     ? ESelectStrategy::BalanceFull
@@ -158,7 +158,7 @@ namespace NKikimr {
             }
 
             // try to find what to compact based on levels balance
-            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task).Select(ranks);
+            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task, ranks).Select();
             if (action != ActNothing) {
                 Task->SelectStrategy = Task->IsFullCompaction
                     ? ESelectStrategy::BalanceFull

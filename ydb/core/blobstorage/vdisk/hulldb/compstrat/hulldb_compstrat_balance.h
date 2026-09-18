@@ -497,10 +497,12 @@ namespace NKikimr {
                     TIntrusivePtr<THullCtx> hullCtx,
                     const TSelectorParams &params,
                     const TLevelIndexSnapshot &levelSnap,
-                    TTask *task)
+                    TTask *task,
+                    const TLevelRanks &ranks)
                 : HullCtx(std::move(hullCtx))
                 , LevelSnap(levelSnap)
                 , Task(task)
+                , Ranks(ranks)
                 , RankThreshold(params.RankThreshold)
                 , FullCompactionAttrs(params.FullCompactionAttrs)
                 , Sublog({})
@@ -512,9 +514,9 @@ namespace NKikimr {
                         Task->IsFullCompaction)
             {}
 
-            EAction Select(const TLevelRanks &ranks) {
+            EAction Select() {
                 TInstant startTime(TAppData::TimeProvider->Now());
-                EAction action = BalanceLevelsTree(ranks);
+                EAction action = BalanceLevelsTree();
                 if (action != ActNothing) {
                     Task->SetupAction(action);
                 }
@@ -527,7 +529,7 @@ namespace NKikimr {
                                 "%s: Balance: action# %s timeSpent# %s RankThreshold# %e ranks# %s",
                                 PDiskSignatureForHullDbKey<TKey>().ToString().data(),
                                 ActionToStr(action), (finishTime - startTime).ToString().data(),
-                                RankThreshold, ranks.ToString().data()));
+                                RankThreshold, Ranks.ToString().data()));
                 }
 
                 return action;
@@ -537,6 +539,7 @@ namespace NKikimr {
             TIntrusivePtr<THullCtx> HullCtx;
             const TLevelIndexSnapshot &LevelSnap;
             TTask *Task;
+            const TLevelRanks &Ranks;
             const double RankThreshold;
             const std::optional<TFullCompactionAttrs> FullCompactionAttrs;
             TSublog<> Sublog;
@@ -544,8 +547,8 @@ namespace NKikimr {
             TBalancePartiallySortedLevels BalancePartiallySortedLevels;
             TBalanceLevelX BalanceLevelX;
 
-            EAction BalanceLevelsTree(const TLevelRanks &ranks) {
-                const double maxRank = ranks.GetMaxRank();
+            EAction BalanceLevelsTree() {
+                const double maxRank = Ranks.GetMaxRank();
 
                 // fill in compaction task or do nothing
                 if (maxRank < RankThreshold) {
@@ -584,12 +587,12 @@ namespace NKikimr {
                 } else {
                     if (HullCtx->VCtx->ActorSystem) {
                         LOG_INFO_S(*HullCtx->VCtx->ActorSystem, NKikimrServices::BS_HULLCOMP,
-                            HullCtx->VCtx->VDiskLogPrefix << " TStrategyBalance decided to compact, ranks# " << ranks.ToString());
+                            HullCtx->VCtx->VDiskLogPrefix << " TStrategyBalance decided to compact, ranks# " << Ranks.ToString());
                     }
-                    switch (ranks.VirtualLevelToCompact) {
+                    switch (Ranks.VirtualLevelToCompact) {
                         case 0:     BalanceLevel0.Compact(); break;
                         case 1:     BalancePartiallySortedLevels.Compact(); break;
-                        default:    BalanceLevelX.Compact(ranks.VirtualLevelToCompact);
+                        default:    BalanceLevelX.Compact(Ranks.VirtualLevelToCompact);
                     }
                     return ActCompactSsts;
                 }
