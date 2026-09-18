@@ -1018,9 +1018,11 @@ public:                                                                         
                 COUNTER_INIT(BlobsSqueeze, true);
 
                 COUNTER_INIT(BlocksPromoteSsts, true);
+                COUNTER_INIT(BlocksExplicit, true);
                 COUNTER_INIT(BlocksBalance, true);
 
                 COUNTER_INIT(BarriersPromoteSsts, true);
+                COUNTER_INIT(BarriersExplicit, true);
                 COUNTER_INIT(BarriersBalance, true);
             }
 
@@ -1034,9 +1036,11 @@ public:                                                                         
             COUNTER_DEF(BlobsSqueeze);
 
             COUNTER_DEF(BlocksPromoteSsts);
+            COUNTER_DEF(BlocksExplicit);
             COUNTER_DEF(BlocksBalance);
 
             COUNTER_DEF(BarriersPromoteSsts);
+            COUNTER_DEF(BarriersExplicit);
             COUNTER_DEF(BarriersBalance);
         };
 

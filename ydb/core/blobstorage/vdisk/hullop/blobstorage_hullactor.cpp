@@ -362,6 +362,9 @@ namespace NKikimr {
                     case NHullComp::ESelectStrategy::PromoteSsts:
                         ++group.BlocksPromoteSsts();
                         break;
+                    case NHullComp::ESelectStrategy::Explicit:
+                        ++group.BlocksExplicit();
+                        break;
                     case NHullComp::ESelectStrategy::BalanceLevel:
                     case NHullComp::ESelectStrategy::BalanceFull:
                         ++group.BlocksBalance();
@@ -373,6 +376,9 @@ namespace NKikimr {
                 switch (CompactionTask->SelectStrategy) {
                     case NHullComp::ESelectStrategy::PromoteSsts:
                         ++group.BarriersPromoteSsts();
+                        break;
+                    case NHullComp::ESelectStrategy::Explicit:
+                        ++group.BarriersExplicit();
                         break;
                     case NHullComp::ESelectStrategy::BalanceLevel:
                     case NHullComp::ESelectStrategy::BalanceFull:

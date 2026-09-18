@@ -1,4 +1,5 @@
 #include "hulldb_compstrat_selector.h"
+#include "hulldb_compstrat_explicit.h"
 #include "hulldb_compstrat_ratio.h"
 #include "hulldb_compstrat_ranks.h"
 #include <util/stream/null.h>
@@ -234,6 +235,51 @@ namespace NKikimr {
 
             task.Clear();
             UNIT_ASSERT_VALUES_EQUAL(task.MaxRatio, 0.0);
+        }
+
+        template<typename TKey, typename TMemRec>
+        void CheckExplicitStrategy(TPriorityTestEnv &env, TLevelIndexSnapshot<TKey, TMemRec> snap, ui64 sstId) {
+            NHullComp::TSelectorParams params = {env.Boundaries, 1.0, TInstant::Zero(), {}};
+            NHullComp::TTask<TKey, TMemRec> task;
+            NHullComp::TStrategyExplicit strategy(env.Ds->HullCtx, params, snap, &task);
+
+            // Without a request or matching SST, no strategy should be recorded.
+            UNIT_ASSERT(strategy.Select() == NHullComp::ActNothing);
+            UNIT_ASSERT(task.SelectStrategy == NHullComp::ESelectStrategy::None);
+            task.FullCompactionInfo.first.emplace(1, TInstant::Zero(), THashSet<ui64>{});
+            UNIT_ASSERT(strategy.Select() == NHullComp::ActNothing);
+            UNIT_ASSERT(task.SelectStrategy == NHullComp::ESelectStrategy::None);
+            task.FullCompactionInfo.first->TablesToCompact.insert(sstId + 1);
+            UNIT_ASSERT(strategy.Select() == NHullComp::ActNothing);
+            UNIT_ASSERT(task.SelectStrategy == NHullComp::ESelectStrategy::None);
+            UNIT_ASSERT(task.FullCompactionInfo.second);
+
+            task.Clear();
+            task.FullCompactionInfo.first.emplace(1, TInstant::Zero(), THashSet<ui64>{sstId});
+            UNIT_ASSERT(strategy.Select() == NHullComp::ActCompactSsts);
+            UNIT_ASSERT(task.SelectStrategy == NHullComp::ESelectStrategy::Explicit);
+            UNIT_ASSERT_VALUES_EQUAL(task.CompactSsts.CompactionChains.size(), 1);
+            UNIT_ASSERT_VALUES_EQUAL(task.CompactSsts.CompactionChains.front()->Segments.front()->AssignedSstId,
+                sstId);
+        }
+
+        Y_UNIT_TEST(ExplicitStrategyRecordsItsTypeForAllDatabases) {
+            TPriorityTestEnv env;
+            const ui64 blobSstId = env.AddSst(0, 1);
+            auto blocksSst = MakeIntrusive<TBlocksSst>(env.Contexts.GetVCtx());
+            blocksSst->AssignedSstId = env.NextSstId++;
+            blocksSst->AllChunks.push_back(1);
+            blocksSst->LoadedIndex.emplace_back(TKeyBlock(1), TMemRecBlock(1));
+            env.Ds->Blocks->CurSlice->Level0.Put(blocksSst);
+            auto barriersSst = MakeIntrusive<TBarriersSst>(env.Contexts.GetVCtx());
+            barriersSst->AssignedSstId = env.NextSstId++;
+            barriersSst->AllChunks.push_back(1);
+            barriersSst->LoadedIndex.emplace_back(TKeyBarrier(1), TMemRecBarrier());
+            env.Ds->Barriers->CurSlice->Level0.Put(barriersSst);
+
+            CheckExplicitStrategy(env, env.Ds->LogoBlobs->GetIndexSnapshot(), blobSstId);
+            CheckExplicitStrategy(env, env.Ds->Blocks->GetIndexSnapshot(), blocksSst->AssignedSstId);
+            CheckExplicitStrategy(env, env.Ds->Barriers->GetIndexSnapshot(), barriersSst->AssignedSstId);
         }
 
         Y_UNIT_TEST(BalanceCompactionUsesCalculatedRanks) {
