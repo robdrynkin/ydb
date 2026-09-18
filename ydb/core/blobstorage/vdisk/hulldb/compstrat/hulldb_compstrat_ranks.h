@@ -10,7 +10,8 @@ namespace NKikimr::NHullComp {
         ui32 VirtualLevelToCompact = 0;
 
         template <class TKey, class TMemRec>
-        TLevelRanks(const TBoundaries &boundaries, const TLevelSliceSnapshot<TKey, TMemRec> &sliceSnap) {
+        TLevelRanks(const TBoundaries &boundaries, const TLevelSliceSnapshot<TKey, TMemRec> &sliceSnap,
+                NMonGroup::TLsmCompactionRankGroup &mon) {
             reserve(8);
             push_back(boundaries.GetRate(0, sliceSnap.GetLevel0ChunksNum()));
 
@@ -33,9 +34,12 @@ namespace NKikimr::NHullComp {
             }
             push_back(pslRank);
 
+            double maxSortedRank = 0.0;
             for (ui32 i = totalPsl; i < otherLevelsNum; ++i) {
                 const ui32 virtualLevel = i - totalPsl + 2;
-                push_back(boundaries.GetRate(virtualLevel, sliceSnap.GetLevelXChunksNum(i)));
+                const double rank = boundaries.GetRate(virtualLevel, sliceSnap.GetLevelXChunksNum(i));
+                push_back(rank);
+                maxSortedRank = Max(maxSortedRank, rank);
             }
 
             for (ui32 i = 1; i < size(); ++i) {
@@ -43,6 +47,10 @@ namespace NKikimr::NHullComp {
                     VirtualLevelToCompact = i;
                 }
             }
+
+            mon.Rank0() = (*this)[0] * NMonGroup::TLsmCompactionRankGroup::RankScale;
+            mon.Rank1_16() = pslRank * NMonGroup::TLsmCompactionRankGroup::RankScale;
+            mon.Rank17Plus() = maxSortedRank * NMonGroup::TLsmCompactionRankGroup::RankScale;
         }
 
         double GetMaxRank() const {

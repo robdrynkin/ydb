@@ -47,10 +47,6 @@ namespace NKikimr {
                 return action;
             }
 
-            // The broker priority reflects the whole LSM, regardless of the selected strategy.
-            const TLevelRanks ranks(*Params.Boundaries, LevelSnap.SliceSnap);
-            Task->MaxRatio = ranks.GetMaxRank();
-
             // compact explicitly defined SST's, if set
             action = TStrategyExplicit(HullCtx, Params, LevelSnap, Task).Select();
             if (action != ActNothing) {
@@ -59,7 +55,7 @@ namespace NKikimr {
             }
 
             // try to find what to compact based on levels balance
-            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task, ranks).Select();
+            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task, Ranks).Select();
             if (action != ActNothing) {
                 Task->SelectStrategy = Task->IsFullCompaction
                     ? ESelectStrategy::BalanceFull
@@ -105,10 +101,6 @@ namespace NKikimr {
                 return action;
             }
 
-            // The broker priority reflects the whole LSM, regardless of the selected strategy.
-            const TLevelRanks ranks(*Params.Boundaries, LevelSnap.SliceSnap);
-            Task->MaxRatio = ranks.GetMaxRank();
-
             // compact explicitly defined SST's, if set
             action = TStrategyExplicit(HullCtx, Params, LevelSnap, Task).Select();
             if (action != ActNothing) {
@@ -116,7 +108,7 @@ namespace NKikimr {
             }
 
             // try to find what to compact based on levels balance
-            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task, ranks).Select();
+            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task, Ranks).Select();
             if (action != ActNothing) {
                 Task->SelectStrategy = Task->IsFullCompaction
                     ? ESelectStrategy::BalanceFull
@@ -147,10 +139,6 @@ namespace NKikimr {
                 return action;
             }
 
-            // The broker priority reflects the whole LSM, regardless of the selected strategy.
-            const TLevelRanks ranks(*Params.Boundaries, LevelSnap.SliceSnap);
-            Task->MaxRatio = ranks.GetMaxRank();
-
             // compact explicitly defined SST's, if set
             action = TStrategyExplicit(HullCtx, Params, LevelSnap, Task).Select();
             if (action != ActNothing) {
@@ -158,7 +146,7 @@ namespace NKikimr {
             }
 
             // try to find what to compact based on levels balance
-            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task, ranks).Select();
+            action = TStrategyBalance(HullCtx, Params, LevelSnap, Task, Ranks).Select();
             if (action != ActNothing) {
                 Task->SelectStrategy = Task->IsFullCompaction
                     ? ESelectStrategy::BalanceFull
