@@ -185,6 +185,21 @@ void CompleteGroup(TLookupFixture& f, ui32 group, NKikimrProto::EReplyStatus sta
     }
 }
 
+void CheckLateReply(TEvStateStorage::TProxyOptions::ESigWaitMode mode) {
+    TLookupFixture f(mode);
+    f.Empty(0);
+    f.Fail(1);
+    f.Fail(2);
+    f.ExpectPending();
+    f.Empty(1);
+    f.ExpectPending();
+    f.Fail(3);
+    // Four distinct replicas have completed; the fifth can still give a quorum.
+    f.ExpectPending();
+    f.Empty(4);
+    f.ExpectReply(NKikimrProto::NODATA);
+}
+
 } // namespace
 
 Y_UNIT_TEST_SUITE(TStateStorageProxyLookup) {
@@ -267,6 +282,105 @@ Y_UNIT_TEST_SUITE(TStateStorageProxyLookup) {
         CompleteGroup(f, 1, NKikimrProto::NODATA);
         f.ExpectReply(NKikimrProto::NODATA);
         UNIT_ASSERT_VALUES_EQUAL(f.Signatures.Size(), 10);
+    }
+
+    Y_UNIT_TEST(LateReplyAfterUndeliveredSigNone) {
+        CheckLateReply(TEvStateStorage::TProxyOptions::SigNone);
+    }
+
+    Y_UNIT_TEST(LateReplyAfterUndeliveredSigAsync) {
+        CheckLateReply(TEvStateStorage::TProxyOptions::SigAsync);
+    }
+
+    Y_UNIT_TEST(LateReplyAfterUndeliveredSigSync) {
+        CheckLateReply(TEvStateStorage::TProxyOptions::SigSync);
+    }
+
+    Y_UNIT_TEST(AsyncLateReplyReplacesFailureBeforeInitialReply) {
+        TLookupFixture f(TEvStateStorage::TProxyOptions::SigAsync);
+        f.Fail(0);
+        f.KnownLeader(1);
+        f.KnownLeader(2);
+        f.KnownLeader(3);
+        f.ExpectReply(NKikimrProto::OK);
+        f.KnownLeader(0);
+        f.Elapse();
+        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 0);
+        f.KnownLeader(4);
+        f.Elapse();
+        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 1);
+        UNIT_ASSERT_VALUES_EQUAL(f.Signatures.Size(), 5);
+    }
+
+    Y_UNIT_TEST(AsyncDuplicateFailureAndLateReplyCountOnce) {
+        TLookupFixture f(TEvStateStorage::TProxyOptions::SigAsync);
+        f.KnownLeader(0);
+        f.KnownLeader(1);
+        f.KnownLeader(2);
+        f.ExpectReply(NKikimrProto::OK);
+        f.Fail(3);
+        f.Fail(3);
+        f.Elapse();
+        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 0);
+        f.KnownLeader(3);
+        f.Elapse();
+        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 0);
+        f.KnownLeader(4);
+        f.Elapse();
+        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 1);
+        UNIT_ASSERT_VALUES_EQUAL(f.Signatures.Size(), 5);
+    }
+
+    Y_UNIT_TEST(AsyncTimeoutIncludesSignatureReplacingEarlierFailure) {
+        TLookupFixture f(TEvStateStorage::TProxyOptions::SigAsync);
+        f.Fail(0);
+        f.KnownLeader(1);
+        f.KnownLeader(2);
+        f.KnownLeader(3);
+        f.ExpectReply(NKikimrProto::OK);
+        f.KnownLeader(0);
+        f.Elapse();
+        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 0);
+        f.Elapse(TDuration::Seconds(30));
+        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 1);
+        UNIT_ASSERT_VALUES_EQUAL(f.Signatures.Size(), 4);
+        UNIT_ASSERT_VALUES_EQUAL(f.Signatures.GetReplicaSignature(f.Replicas[0]), 1);
+    }
+
+    Y_UNIT_TEST(DuplicateEmptyReplyDoesNotCountTwice) {
+        TLookupFixture f;
+        f.Empty(0);
+        f.Empty(0);
+        f.Empty(1);
+        f.ExpectPending();
+        f.Empty(2);
+        f.ExpectPending();
+        f.Empty(3);
+        f.Empty(4);
+        f.ExpectReply(NKikimrProto::NODATA);
+    }
+
+    Y_UNIT_TEST(PositiveQuorumStillReturnsLeader) {
+        TLookupFixture f;
+        f.KnownLeader(0);
+        f.KnownLeader(1);
+        f.ExpectPending();
+        f.KnownLeader(2);
+        f.ExpectReply(NKikimrProto::OK);
+        UNIT_ASSERT_VALUES_EQUAL(f.ReplyLeader, f.Leader);
+    }
+
+    Y_UNIT_TEST(SigSyncStillWaitsForAllResults) {
+        TLookupFixture f(TEvStateStorage::TProxyOptions::SigSync);
+        f.Empty(0);
+        f.Empty(1);
+        f.Empty(2);
+        f.ExpectPending();
+        f.Empty(3);
+        f.ExpectPending();
+        f.Fail(4);
+        f.ExpectReply(NKikimrProto::NODATA);
+        UNIT_ASSERT_VALUES_EQUAL(f.Signatures.GetReplicaSignature(f.Replicas[4]), 0);
     }
 }
 

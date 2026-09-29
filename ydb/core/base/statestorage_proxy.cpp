@@ -65,6 +65,7 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
     ui32 RepliesMerged;
     ui32 RepliesAfterReply;
     ui32 SignaturesMerged;
+    bool SignaturesUpdated = false;
 
     TActorId ReplyLeader;
     TActorId ReplyLeaderTablet;
@@ -260,9 +261,10 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
                 {"ev", ev->ToString()});
             return;
         }
-        UndeliveredReplicas.erase(replicaId);
+        if (!UndeliveredReplicas.erase(replicaId)) {
+            ++RepliesMerged;
+        }
         Signature.SetReplicaSignature(replicaId, ev->Record.GetSignature());
-        ++RepliesMerged;
         ++SignaturesMerged;
 
         switch (status) {
@@ -596,17 +598,28 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
     void UpdateSigFor(ui64 cookie, ui64 sig) {
         Y_ABORT_UNLESS(cookie < Replicas);
         const auto replicaId = ReplicaSelection->SelectedReplicas[cookie];
-        if ((sig == Max<ui64>() && UndeliveredReplicas.insert(replicaId).second) || !Signature.HasReplicaSignature(replicaId)) {
-            if (sig != Max<ui64>()) {
-                Signature.SetReplicaSignature(replicaId, sig);
+        if (Signature.HasReplicaSignature(replicaId)) {
+            return;
+        }
+        if (sig == Max<ui64>()) {
+            if (!UndeliveredReplicas.insert(replicaId).second) {
+                return;
             }
             ++RepliesAfterReply;
-            ++SignaturesMerged;
-
-            if (RepliesMerged + RepliesAfterReply == Replicas) {
-                Send(Source, new TEvStateStorage::TEvUpdateSignature(TabletID, Signature), 0, SourceCookie);
-                return PassAway();
+        } else {
+            // A real reply replaces a previously counted delivery failure,
+            // including failures received before the initial client reply.
+            if (!UndeliveredReplicas.erase(replicaId)) {
+                ++RepliesAfterReply;
             }
+            Signature.SetReplicaSignature(replicaId, sig);
+            ++SignaturesMerged;
+            SignaturesUpdated = true;
+        }
+
+        if (RepliesMerged + RepliesAfterReply == Replicas) {
+            Send(Source, new TEvStateStorage::TEvUpdateSignature(TabletID, Signature), 0, SourceCookie);
+            return PassAway();
         }
     }
 
@@ -653,7 +666,6 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
                 {"ev", ev->ToString()});
             return;
         }
-        UndeliveredReplicas.erase(replicaId);
         return UpdateSigFor(cookie, msg->Record.GetSignature());
     }
 
@@ -661,7 +673,7 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
         YDB_LOG_DEBUG("ProxyRequest::HandleUpdateSigTimeout",
             {"ringGroup", RingGroupIndex},
             {"repliesAfterReply", (ui32)RepliesAfterReply});
-        if (RepliesAfterReply > 0)
+        if (RepliesAfterReply > 0 || SignaturesUpdated)
             Send(Source, new TEvStateStorage::TEvUpdateSignature(TabletID, Signature), 0, SourceCookie);
         PassAway();
     }
