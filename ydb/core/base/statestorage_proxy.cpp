@@ -762,7 +762,7 @@ class TStateStorageRingGroupProxyRequest : public TActorBootstrapped<TStateStora
 
     TActorId Source;
     ui64 SourceCookie = 0;
-    THashSet<TActorId> Replies;
+    THashMap<TActorId, NKikimrProto::EReplyStatus> Replies;
     ui32 RingGroupPassAwayCounter;
 
     ui64 TabletID;
@@ -845,6 +845,46 @@ class TStateStorageRingGroupProxyRequest : public TActorBootstrapped<TStateStora
         return true;
     }
 
+    NKikimrProto::EReplyStatus GetReplyStatus() const {
+        bool hasOk = false;
+        bool hasNoData = false;
+        bool hasRace = false;
+        bool hasTimeout = false;
+        for (const auto& [ringGroupIndex, actorId] : RingGroupActorsByIndex) {
+            if (Info->RingGroups[ringGroupIndex].WriteOnly) {
+                continue;
+            }
+            switch (Replies.at(actorId)) {
+            case NKikimrProto::OK:
+                hasOk = true;
+                break;
+            case NKikimrProto::NODATA:
+                hasNoData = true;
+                break;
+            case NKikimrProto::RACE:
+                hasRace = true;
+                break;
+            case NKikimrProto::TIMEOUT:
+                hasTimeout = true;
+                break;
+            default:
+                return NKikimrProto::ERROR;
+            }
+        }
+        // Failures take precedence over successful or empty lookups. Mixing
+        // OK and NODATA is inconsistent; only unanimous results are successful.
+        if (hasTimeout) {
+            return NKikimrProto::TIMEOUT;
+        }
+        if (hasRace || (hasOk && hasNoData)) {
+            return NKikimrProto::RACE;
+        }
+        if (hasNoData) {
+            return NKikimrProto::NODATA;
+        }
+        return hasOk ? NKikimrProto::OK : NKikimrProto::ERROR;
+    }
+
     void Reply(NKikimrProto::EReplyStatus status) {
         auto* msg = new TEvStateStorage::TEvInfo(
             status,
@@ -866,7 +906,7 @@ class TStateStorageRingGroupProxyRequest : public TActorBootstrapped<TStateStora
         Replied = true;
     }
 
-    void MaybeReply(NKikimrProto::EReplyStatus status) {
+    void MaybeReply() {
         if (!ShouldReply()) {
             return;
         }
@@ -876,23 +916,23 @@ class TStateStorageRingGroupProxyRequest : public TActorBootstrapped<TStateStora
                 {"ev", msg->ToString()});
             Send(Source, msg, 0, SourceCookie);
         } else {
-            Reply(status);
+            Reply(GetReplyStatus());
         }
     }
 
     void HandleResult(TEvStateStorage::TEvInfo::TPtr &ev) {
         TEvStateStorage::TEvInfo *msg = ev->Get();
-        Replies.insert(ev->Sender);
+        Replies.emplace(ev->Sender, msg->Status);
         ProcessEvInfo(RingGroupActors[ev->Sender], msg);
         YDB_LOG_DEBUG("RingGroupProxyRequest::HandleTEvInfo",
             {"ev", msg->ToString()});
-        MaybeReply(msg->Status);
+        MaybeReply();
     }
 
     void HandleResult(TEvStateStorage::TEvUpdateSignature::TPtr &ev) {
         TEvStateStorage::TEvUpdateSignature *msg = ev->Get();
         Signature.Merge(msg->Signature);
-        MaybeReply(NKikimrProto::OK);
+        MaybeReply();
     }
 
     void HandleConfigVersion(TEvStateStorage::TEvConfigVersionInfo::TPtr &ev) {
