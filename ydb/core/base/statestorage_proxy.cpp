@@ -87,10 +87,6 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
         return RepliedReplicasCount() + UndeliveredReplicas.size();
     }
 
-    bool AllReplicasAccountedFor() const {
-        return AccountedReplicasCount() == Replicas;
-    }
-
     ui32 Majority() const {
         return Replicas / 2 + 1;
     }
@@ -156,7 +152,7 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
 
     void ReplyAndSig(NKikimrProto::EReplyStatus status) {
         Reply(status);
-        if (ProxyOptions.SigWaitMode == ProxyOptions.SigAsync && !AllReplicasAccountedFor())
+        if (ProxyOptions.SigWaitMode == ProxyOptions.SigAsync && AccountedReplicasCount() != Replicas)
             Become(&TThis::StateUpdateSig);
         else
             PassAway();
@@ -462,7 +458,7 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
     void CheckLookupReply() {
         const bool allowReply = ProxyOptions.SigWaitMode == ProxyOptions.SigNone
             || (ProxyOptions.SigWaitMode == ProxyOptions.SigAsync && RepliedReplicasCount() >= Majority())
-            || AllReplicasAccountedFor();
+            || AccountedReplicasCount() == Replicas;
 
         if (allowReply) {
             switch (ReplyStatus) {
@@ -472,7 +468,7 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
                 ReplyAndSig(NKikimrProto::OK);
                 return;
             case TStateStorageInfo::TSelection::StatusNoInfo:
-                if (AllReplicasAccountedFor()) { // for negative response always waits for full reply set to avoid herding of good replicas by fast retry cycle
+                if (AccountedReplicasCount() == Replicas) { // for negative response always waits for full reply set to avoid herding of good replicas by fast retry cycle
                     ReplyAndSig(NKikimrProto::NODATA);
                 }
                 return;
@@ -542,7 +538,7 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
     }
 
     void CheckUpdateReply() {
-        const bool allowReply = ProxyOptions.SigWaitMode != ProxyOptions.SigSync || AllReplicasAccountedFor();
+        const bool allowReply = ProxyOptions.SigWaitMode != ProxyOptions.SigSync || AccountedReplicasCount() == Replicas;
 
         if (allowReply) {
             switch (ReplyStatus) {
@@ -620,7 +616,7 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
         }
         ++RepliesAfterReply;
 
-        if (AllReplicasAccountedFor()) {
+        if (AccountedReplicasCount() == Replicas) {
             Send(Source, new TEvStateStorage::TEvUpdateSignature(TabletID, Signature), 0, SourceCookie);
             return PassAway();
         }
@@ -641,7 +637,7 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
             {"disconnectedNode", node});
         MergeSigNodeError(node);
 
-        if (AllReplicasAccountedFor()) {
+        if (AccountedReplicasCount() == Replicas) {
             Send(Source, new TEvStateStorage::TEvUpdateSignature(TabletID, Signature), 0, SourceCookie);
             return PassAway();
         }
