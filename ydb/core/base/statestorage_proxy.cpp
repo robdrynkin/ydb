@@ -62,7 +62,8 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
     THashSet<TActorId> UndeliveredReplicas;
 
     TStateStorageInfo::TSelection::EStatus ReplyStatus;
-    bool SignaturesUpdated = false;
+    // Used only to decide whether to send a signature update on timeout.
+    ui32 RepliesAfterReply;
 
     TActorId ReplyLeader;
     TActorId ReplyLeaderTablet;
@@ -598,8 +599,8 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
         for (ui32 i = 0; i < ReplicaSelection->Sz; ++i) {
             const auto replicaId = ReplicaSelection->SelectedReplicas[i];
             if (replicaId.NodeId() == node) {
-                if (!Signature.HasReplicaSignature(replicaId)) {
-                    UndeliveredReplicas.insert(replicaId);
+                if (!Signature.HasReplicaSignature(replicaId) && UndeliveredReplicas.insert(replicaId).second) {
+                    ++RepliesAfterReply;
                 }
             }
         }
@@ -616,8 +617,8 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
         } else {
             UndeliveredReplicas.erase(replicaId);
             Signature.SetReplicaSignature(replicaId, sig);
-            SignaturesUpdated = true;
         }
+        ++RepliesAfterReply;
 
         if (AllReplicasAccountedFor()) {
             Send(Source, new TEvStateStorage::TEvUpdateSignature(TabletID, Signature), 0, SourceCookie);
@@ -674,8 +675,8 @@ class TStateStorageProxyRequest : public TActor<TStateStorageProxyRequest> {
     void HandleUpdateSigTimeout() {
         YDB_LOG_DEBUG("ProxyRequest::HandleUpdateSigTimeout",
             {"ringGroup", RingGroupIndex},
-            {"signaturesUpdated", SignaturesUpdated});
-        if (SignaturesUpdated)
+            {"repliesAfterReply", (ui32)RepliesAfterReply});
+        if (RepliesAfterReply > 0)
             Send(Source, new TEvStateStorage::TEvUpdateSignature(TabletID, Signature), 0, SourceCookie);
         PassAway();
     }
@@ -695,6 +696,7 @@ public:
         , SuggestedStep(0)
         , Replicas(0)
         , ReplyStatus(TStateStorageInfo::TSelection::StatusUnknown)
+        , RepliesAfterReply(0)
         , ReplyGeneration(0)
         , ReplyStep(0)
         , ReplyLocked(false)

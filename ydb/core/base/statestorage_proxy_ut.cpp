@@ -229,7 +229,7 @@ Y_UNIT_TEST_SUITE(TStateStorageProxyLookup) {
         UNIT_ASSERT_VALUES_EQUAL(f.Signatures.GetReplicaSignature(f.Replicas[0]), 1);
     }
 
-    Y_UNIT_TEST(AsyncTimeoutWithoutNewSignaturesDoesNotSendUpdate) {
+    Y_UNIT_TEST(AsyncTimeoutAfterDeliveryFailureStillSendsUpdate) {
         TLookupFixture f(TEvStateStorage::TProxyOptions::SigAsync);
         f.KnownLeader(0);
         f.KnownLeader(1);
@@ -238,8 +238,18 @@ Y_UNIT_TEST_SUITE(TStateStorageProxyLookup) {
         f.Fail(3);
         // The last replica stays pending; only a delivery failure was added.
         f.Elapse(TDuration::Seconds(30));
-        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 0);
+        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 1);
         UNIT_ASSERT_VALUES_EQUAL(f.Signatures.Size(), 3);
+    }
+
+    Y_UNIT_TEST(AsyncTimeoutWithoutFurtherEventsDoesNotSendUpdate) {
+        TLookupFixture f(TEvStateStorage::TProxyOptions::SigAsync);
+        f.KnownLeader(0);
+        f.KnownLeader(1);
+        f.KnownLeader(2);
+        f.ExpectReply(NKikimrProto::OK);
+        f.Elapse(TDuration::Seconds(30));
+        UNIT_ASSERT_VALUES_EQUAL(f.SignatureUpdateCount, 0);
     }
 
     Y_UNIT_TEST(DuplicateEmptyReplyDoesNotCountTwice) {
