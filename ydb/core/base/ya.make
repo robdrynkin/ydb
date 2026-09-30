@@ -166,6 +166,7 @@ RECURSE(
 IF (NOT OPENSOURCE OR OPENSOURCE_PROJECT == "ydb")
 RECURSE_FOR_TESTS(
     ut
+    ut_statestorage_proxy
     ut_auth
     ut_backtrace
     ut_board_subscriber
