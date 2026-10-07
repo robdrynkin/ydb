@@ -1,4 +1,5 @@
 #include "queue_backpressure_server.h"
+#include <ydb/core/blobstorage/vdisk/common/vdisk_config.h>
 #include <library/cpp/testing/unittest/registar.h>
 
 #include <util/stream/null.h>
@@ -48,6 +49,103 @@ namespace NKikimr {
             STR << res << "\n";
             STR << str.Str() << "\n";
             UNIT_ASSERT_STRINGS_EQUAL(str.Str(), res);
+        }
+
+        struct TWindowNotificationStats {
+            ui64 Requests = 0;
+            ui64 Notifications = 0;
+        };
+
+        TWindowNotificationStats RunPeriodicClients(ui32 numClients) {
+            const TVDiskConfig config(TVDiskConfig::TBaseInfo::SampleForTests());
+            const ui64 totalCost = config.SkeletonFrontExtGetFast_TotalCost;
+            const auto percentOfCost = [&](ui64 percent) { return totalCost * percent / 100; };
+            TQueueBackpressure<ui64> queue(config.SkeletonFrontQueueBackpressureCheckMsgId, totalCost,
+                percentOfCost(config.WindowCostChangeToRecalculatePercent),
+                percentOfCost(config.WindowMinLowWatermarkPercent),
+                percentOfCost(config.WindowMaxLowWatermarkPercent),
+                config.WindowPercentThreshold,
+                percentOfCost(config.WindowCostChangeUntilFrozenPercent),
+                percentOfCost(config.WindowCostChangeUntilDeathPercent),
+                config.WindowTimeout);
+
+            // The default minimum window is 2% of the budget, reached at 50 clients.
+            // Push and Processed both contribute to the cost-change countdown: a
+            // request costs 0.2% of the budget, so 50 requests turn over the 20%
+            // budget used to freeze idle clients. No special client or pause is needed.
+            const ui64 requestCost = totalCost / 500;
+            constexpr ui32 warmupRounds = 100;
+            constexpr ui32 measuredRounds = 1000;
+            const TDuration period = TDuration::MilliSeconds(10);
+            const TDuration latency = TDuration::MilliSeconds(5);
+            const TInstant start = TInstant::Seconds(1);
+            TWindowNotificationStats stats;
+
+            for (ui32 round = 0; round < warmupRounds + measuredRounds; ++round) {
+                const bool measure = round >= warmupRounds;
+                const TInstant roundStart = start + period * round;
+                const auto account = [&](const TFeedback& feedback, const TActorId& actorId) {
+                    UNIT_ASSERT_C(feedback.Good(), feedback.first.ToString());
+                    for (const auto& update : feedback.second) {
+                        UNIT_ASSERT(update.Notify);
+                        UNIT_ASSERT(update.Status == NKikimrBlobStorage::TWindowFeedback::WindowUpdate);
+                        UNIT_ASSERT(update.ActorId != actorId);
+                    }
+                    if (measure) {
+                        // SkeletonFront::NotifyOtherClients sends one separate
+                        // TEvVWindowChange for each entry; feedback.first goes in
+                        // the ordinary response and must not be counted here.
+                        stats.Notifications += feedback.second.size();
+                    }
+                };
+
+                // Every client issues one request per period, with evenly spaced
+                // phases in the first half of the period and a fixed response latency.
+                // All clients have identical rates, costs and response delays. The
+                // second half completes the same requests in order. This deliberately
+                // exercises periodic waves, not a continuously saturated client set.
+                for (ui32 client = 0; client < numClients; ++client) {
+                    const TActorId actorId(1, 1, client + 1, 1);
+                    const TInstant now = roundStart + TDuration::MicroSeconds(latency.MicroSeconds() * client / numClients);
+                    const auto feedback = queue.Push(client, actorId, TMessageId(0, round), requestCost, now);
+                    account(feedback, actorId);
+                    if (measure) {
+                        ++stats.Requests;
+                    }
+                }
+                for (ui32 client = 0; client < numClients; ++client) {
+                    const TActorId actorId(1, 1, client + 1, 1);
+                    const TInstant now = roundStart + latency
+                        + TDuration::MicroSeconds(latency.MicroSeconds() * client / numClients);
+                    const auto feedback = queue.Processed(actorId, TMessageId(0, round), requestCost, now);
+                    account(feedback, actorId);
+                }
+            }
+
+            Cerr << "PeriodicClients clients=" << numClients
+                << " requests=" << stats.Requests
+                << " windowChangeNotifications=" << stats.Notifications
+                << " notificationsPerRequest=" << double(stats.Notifications) / stats.Requests << Endl;
+            return stats;
+        }
+
+        Y_UNIT_TEST(WindowChangeNotificationsWithPeriodicClients) {
+            // Characterize the current immediate-notification policy. Keep this
+            // baseline when adding actor-level coverage for notification coalescing.
+            const auto clients50 = RunPeriodicClients(50);
+            const auto clients51 = RunPeriodicClients(51);
+            const auto clients100 = RunPeriodicClients(100);
+
+            UNIT_ASSERT_VALUES_EQUAL(clients50.Notifications, 0);
+            UNIT_ASSERT_C(clients51.Notifications > clients51.Requests,
+                "51 periodic clients should produce more than one notification per request");
+            UNIT_ASSERT_C(clients100.Notifications > 2 * clients51.Notifications,
+                "100 periodic clients should produce over twice as many notifications as 51 clients");
+            // The amplification must also increase after normalizing for request
+            // count, rather than only because the 100-client run sends more requests.
+            UNIT_ASSERT_C(clients100.Notifications * clients51.Requests
+                    > clients51.Notifications * clients100.Requests,
+                "Notifications per request should increase from 51 to 100 clients");
         }
 
 
