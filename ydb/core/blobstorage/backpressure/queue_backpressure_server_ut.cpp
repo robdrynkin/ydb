@@ -125,7 +125,9 @@ namespace NKikimr {
             Cerr << "PeriodicClients clients=" << numClients
                 << " requests=" << stats.Requests
                 << " windowChangeNotifications=" << stats.Notifications
-                << " notificationsPerRequest=" << double(stats.Notifications) / stats.Requests << Endl;
+                << " notificationsPerRequest=" << double(stats.Notifications) / stats.Requests
+                << " notificationsPerRoundPerClientSquared="
+                << double(stats.Notifications) / measuredRounds / numClients / numClients << Endl;
             return stats;
         }
 
@@ -135,6 +137,10 @@ namespace NKikimr {
             const auto clients50 = RunPeriodicClients(50);
             const auto clients51 = RunPeriodicClients(51);
             const auto clients100 = RunPeriodicClients(100);
+            const auto clients1000 = RunPeriodicClients(1000);
+
+            Cerr << "PeriodicClients notificationGrowth100To1000="
+                << double(clients1000.Notifications) / clients100.Notifications << Endl;
 
             UNIT_ASSERT_VALUES_EQUAL(clients50.Notifications, 0);
             UNIT_ASSERT_C(clients51.Notifications > clients51.Requests,
@@ -146,6 +152,11 @@ namespace NKikimr {
             UNIT_ASSERT_C(clients100.Notifications * clients51.Requests
                     > clients51.Notifications * clients100.Requests,
                 "Notifications per request should increase from 51 to 100 clients");
+            // This workload saturates rather than growing quadratically: additional
+            // clients keep the window at its minimum for longer within each wave.
+            // Preserve the measured 1000-client baseline instead of extrapolating
+            // the increase observed between 51 and 100 clients.
+            UNIT_ASSERT_VALUES_EQUAL(clients1000.Notifications, clients100.Notifications);
         }
 
 
