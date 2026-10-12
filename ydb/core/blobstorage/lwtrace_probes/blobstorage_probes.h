@@ -56,6 +56,14 @@ struct TEventTypeField {
 }
 
 #define BLOBSTORAGE_PROVIDER(PROBE, EVENT, GROUPS, TYPES, NAMES) \
+    PROBE(BSQueueServerOperation, GROUPS("BSQueue"), \
+        TYPES(TString, ui32, ui32, TString, ui32, TString, ui64, bool, ui64, ui64, ui64, ui64, ui64, ui64, ui64, ui64, ui64), \
+        NAMES("server", "queue", "type", "operation", "status", "client", "requestCost", "recalculated", \
+            "active", "fading", "frozen", "totalCost", "low", "clientLow", "clientHigh", "clientCost", "notifications")) \
+    PROBE(BSQueueClientState, GROUPS("BSQueue"), \
+        TYPES(TString, TString, ui32, ui32, ui64, TString, ui32, ui64, ui64, ui64, ui64, ui64, ui64, ui32, bool, bool, ui64), \
+        NAMES("client", "vdisk", "queue", "type", "cookie", "operation", "status", "waiting", "waitingBytes", \
+            "inFlight", "inFlightBytes", "inFlightCost", "window", "state", "paused", "postponePump", "previousWindow")) \
     PROBE(DSProxyBatchedPutRequest, GROUPS("DSProxy"), \
         TYPES(ui64, ui32), \
         NAMES("count" , "groupId")) \

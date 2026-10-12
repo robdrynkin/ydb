@@ -100,6 +100,7 @@ class TBlobStorageQueue {
 
     ui64 WindowSize;
     ui64 InFlightCost;
+    ui64 BytesInFlight = 0;
     ui64 NextMsgId;
     ui64 CurrentSequenceId;
 
@@ -185,6 +186,10 @@ public:
             const TBlobStorageGroupType& type);
     void InvalidateCosts();
     bool SetMaxWindowSize(ui64 maxWindowSize);
+
+    ui64 GetWindowSize() const { return WindowSize; }
+    ui64 GetBytesInFlight() const { return BytesInFlight; }
+    bool IsPaused() const { return Paused; }
     std::shared_ptr<const TCostModel> GetCostModel() const;
 
     void SetItemQueue(TItem& item, EItemQueue newQueue);

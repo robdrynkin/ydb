@@ -102,6 +102,7 @@ void TBlobStorageQueue::SetItemQueue(TItem& item, EItemQueue newQueue) {
         case EItemQueue::InFlight:
             --*QueueInFlightItems;
             *QueueInFlightBytes -= item.GetByteSize();
+            BytesInFlight -= item.GetByteSize();
             *QueueInFlightCost -= item.Cost;
             break;
     }
@@ -120,6 +121,7 @@ void TBlobStorageQueue::SetItemQueue(TItem& item, EItemQueue newQueue) {
         case EItemQueue::InFlight:
             ++*QueueInFlightItems;
             *QueueInFlightBytes += item.GetByteSize();
+            BytesInFlight += item.GetByteSize();
             *QueueInFlightCost += item.Cost;
             break;
     }

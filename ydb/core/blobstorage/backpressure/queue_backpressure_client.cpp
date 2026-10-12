@@ -4,6 +4,7 @@
 #include "unisched.h"
 #include "common.h"
 #include "load_based_timeout.h"
+#include <util/generic/scope.h>
 
 #define YDB_LOG_THIS_FILE_COMPONENT NKikimrServices::BS_QUEUE
 
@@ -172,6 +173,13 @@ private:
         return State == EState::READY;
     }
 
+    void TraceState(ui32 type, ui64 cookie, const char* operation, ui32 status, ui64 previousWindow) {
+        LWPROBE(BSQueueClientState, SelfId().ToString(), RemoteVDisk.ToString(), ui32(QueueId), type, cookie,
+            operation, status, Queue.GetItemsWaiting(), Queue.GetBytesWaiting(), Queue.InFlightCount(),
+            Queue.GetBytesInFlight(), Queue.GetInFlightCost(), Queue.GetWindowSize(), ui32(State),
+            Queue.IsPaused(), PostponePump, previousWindow);
+    }
+
     void Pump(const TActorContext &ctx) {
         // if in 'Running' state, then send messages to VDisk
         if (IsReady()) {
@@ -255,12 +263,17 @@ private:
             {"cookie", ev->Cookie},
             {"marker", "BSQ05"});
 
+        const auto type = ev->GetTypeRewrite();
+        const auto cookie = ev->Cookie;
+        const auto previousWindow = Queue.GetWindowSize();
         if (IsReady()) {
             Queue.Enqueue(ctx, ev, deadline, RemoteVDisk.NodeId() == SelfId().NodeId());
+            TraceState(type, cookie, "enqueue", NKikimrProto::OK, previousWindow);
             Pump(ctx);
             UpdateRequestTrackingStats(ctx);
         } else {
             auto reply = std::make_unique<R>();
+            TraceState(type, cookie, "not_ready", NKikimrProto::NOTREADY, previousWindow);
             reply->MakeError(NKikimrProto::NOTREADY, "BS_QUEUE is not ready", record);
             ctx.Send(ev->Sender, reply.release(), 0, ev->Cookie);
         }
@@ -325,6 +338,18 @@ private:
 
     template <typename T>
     void HandleResponse(T &ev, const TActorContext &ctx) {
+        const auto type = ev->GetTypeRewrite();
+        const auto traceCookie = ev->Cookie;
+        const auto previousWindow = Queue.GetWindowSize();
+        ui32 traceStatus = Max<ui32>(); // absent until a valid response status is read
+        const char* traceOperation = "ignored_response";
+        bool traced = false;
+        auto trace = [&] {
+            TraceState(type, traceCookie, traceOperation, traceStatus, previousWindow);
+            traced = true;
+        };
+        Y_DEFER { if (!traced) { trace(); } };
+
         if (!CheckReply(ev, ctx)) {
             return;
         }
@@ -361,6 +386,7 @@ private:
 
             // parse the record
             status = F(record, Status);
+            traceStatus = status;
             const auto& qos = F(record, MsgQoS);
             const auto& qosMsgId = F(qos, MsgId);
             msgId = F(qosMsgId, MsgId);
@@ -379,6 +405,8 @@ private:
                     {"marker", "BSQ37"});
                 return;
             }
+
+            traceOperation = "response";
 
             // update cost model if received
             if (qos.HasCostSettings()) {
@@ -519,6 +547,7 @@ private:
                             Schedule(PostponePumpDelay, new TEvPostponedPump);
                         }
                     } else {
+                        trace();
                         Pump(ctx);
                     }
                     return;
@@ -561,6 +590,7 @@ private:
             {"dsproxyAwaitingResponse", dsproxyAwaitingResponse},
             {"marker", "BSQ08"});
 
+        trace();
         Pump(ctx);
     }
 
@@ -581,6 +611,7 @@ private:
     }
 
     void Handle(TEvBlobStorage::TEvVWindowChange::TPtr &ev, const TActorContext &ctx) {
+        const auto previousWindow = Queue.GetWindowSize();
         YDB_LOG_DEBUG_CTX(ctx, "Dump logPrefix, func, windowChange, marker",
             {"logPrefix", LogPrefix},
             {"func", __func__},
@@ -590,13 +621,16 @@ private:
         if (record.GetDropConnection()) {
             ++*DropConnectionReceived;
             ResetConnection(ctx, NKikimrProto::VDISK_ERROR_STATE, "VDisk disconnected due to error", TDuration::Seconds(10));
+            TraceState(ev->GetTypeRewrite(), ev->Cookie, "drop_connection", NKikimrProto::VDISK_ERROR_STATE, previousWindow);
         } else {
             ++*WindowChangeReceived;
             if (!record.HasWindow()) {
+                TraceState(ev->GetTypeRewrite(), ev->Cookie, "window_change", Max<ui32>(), previousWindow);
                 return;
             }
             const auto& window = record.GetWindow();
             HandleWindow(ctx, window);
+            TraceState(ev->GetTypeRewrite(), ev->Cookie, "window_change", ui32(window.GetStatus()), previousWindow);
             ResetWatchdogTimer(ctx.Now());
             Pump(ctx);
         }

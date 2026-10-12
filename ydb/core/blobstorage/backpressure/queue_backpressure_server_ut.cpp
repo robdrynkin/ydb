@@ -65,6 +65,26 @@ namespace NKikimr {
             UNIT_ASSERT_VALUES_EQUAL(frozen->Val(), 0);
         }
 
+        Y_UNIT_TEST(RecalculationSnapshotIsPerOperation) {
+            TQueueBackpressure<ui64> qb(true, 100, 10);
+            const TActorId actor(1, 1, 1, 1);
+            const auto now = TInstant::Seconds(1);
+            qb.Push(1, actor, TMessageId(0, 0), 1, now); // new client forces recalculation
+            const auto first = qb.GetRecalculation();
+            UNIT_ASSERT(first.Recalculated);
+            UNIT_ASSERT_VALUES_EQUAL(first.Active, 1);
+            UNIT_ASSERT_VALUES_EQUAL(first.Fading, 0);
+            UNIT_ASSERT_VALUES_EQUAL(first.TotalCost, 1);
+            UNIT_ASSERT_VALUES_EQUAL(first.Low, 20);
+            qb.Processed(actor, TMessageId(0, 0), 1, now); // below recalculation threshold
+            UNIT_ASSERT(!qb.GetRecalculation().Recalculated);
+            UNIT_ASSERT_VALUES_EQUAL(qb.GetRecalculation().Active, 0);
+            UNIT_ASSERT_VALUES_EQUAL(qb.GetRecalculation().TotalCost, 0);
+            const auto [low, high] = qb.GetWatermarks(actor);
+            UNIT_ASSERT_VALUES_EQUAL(low, 20);
+            UNIT_ASSERT_VALUES_EQUAL(high, 100);
+        }
+
         Y_UNIT_TEST(CreateDelete) {
             TQueueBackpressure<ui64> qb(true, 100u, 10u);
 

@@ -535,6 +535,18 @@ namespace NKikimr {
             NMonitoring::TDynamicCounters::TCounterPtr WindowChangeSent;
             NMonitoring::TDynamicCounters::TCounterPtr DropConnectionSent;
 
+            void TraceOperation(const TActorContext& ctx, const TFeedback& feedback, const TActorId& client,
+                    ui32 type, const char* operation, ui64 cost) const {
+                if (GLOBAL_LWPROBE_ENABLED(BLOBSTORAGE_PROVIDER, BSQueueServerOperation)) {
+                    const auto& recalc = QueueBackpressure->GetRecalculation();
+                    const auto [low, high] = QueueBackpressure->GetWatermarks(client);
+                    GLOBAL_LWPROBE(BLOBSTORAGE_PROVIDER, BSQueueServerOperation,
+                        ctx.SelfID.ToString(), ui32(ExtQueueId), type, operation, ui32(feedback.first.Status),
+                        client.ToString(), cost, recalc.Recalculated, recalc.Active, recalc.Fading, recalc.Frozen,
+                        recalc.TotalCost, recalc.Low, low, high, feedback.first.ActualWindowSize, feedback.second.size());
+                }
+            }
+
             void NotifyOtherClients(const TActorContext &ctx, const TFeedback &feedback) {
                 for (const auto &x : feedback.second) {
                     SendWindowChange(ctx, x, ExtQueueId);
@@ -600,6 +612,7 @@ namespace NKikimr {
                                            const NBackpressure::TQueueClientId& clientId) {
                 TInstant now = TAppData::TimeProvider->Now();
                 auto feedback = QueueBackpressure->Push(clientId, converted->Sender, msgId, cost, now);
+                TraceOperation(ctx, feedback, converted->Sender, converted->GetTypeRewrite(), "request", cost);
                 NotifyOtherClients(ctx, feedback);
                 if (!feedback.Good()) {
 #ifdef VERBOSE
@@ -626,6 +639,7 @@ namespace NKikimr {
             void DeadlineHappened(const TActorContext &ctx, TRecord *rec, TInstant now, TFront &front) {
                 ++*SkeletonFrontDeadline;
                 auto feedback = QueueBackpressure->Processed(rec->ActorId, rec->MsgId, rec->Cost, now);
+                TraceOperation(ctx, feedback, rec->ActorId, rec->Ev->GetTypeRewrite(), "deadline", rec->Cost);
                 front.ReplyFunc(std::move(rec->Ev), ctx, NKikimrProto::DEADLINE, "deadline exceeded", now, feedback.first);
                 NotifyOtherClients(ctx, feedback);
             }
@@ -633,6 +647,7 @@ namespace NKikimr {
             template <class TFront>
             void DroppedWithError(const TActorContext &ctx, TRecord *rec, TInstant now, TFront &front) {
                 auto feedback = QueueBackpressure->Processed(rec->ActorId, rec->MsgId, rec->Cost, now);
+                TraceOperation(ctx, feedback, rec->ActorId, rec->Ev->GetTypeRewrite(), "error", rec->Cost);
                 front.ReplyFunc(std::move(rec->Ev), ctx, NKikimrProto::ERROR, "error state", now, feedback.first);
             }
 
@@ -649,6 +664,7 @@ namespace NKikimr {
                 TInstant now = TAppData::TimeProvider->Now();
                 Y_VERIFY_S(msgCtx.ActorId, VDiskLogPrefix);
                 auto feedback = QueueBackpressure->Processed(msgCtx.ActorId, msgCtx.MsgId, msgCtx.Cost, now);
+                TraceOperation(ctx, feedback, msgCtx.ActorId, evHandle->GetTypeRewrite(), "completion", msgCtx.Cost);
                 NKikimrBlobStorage::TMsgQoS *msgQoS = nullptr;
                 switch (evHandle->Type) {
 #define UPDATE_WINDOW_STATUS(TYPE) case TYPE::EventType: msgQoS = evHandle->CastAsLocal<TYPE>()->Record.MutableMsgQoS(); break;

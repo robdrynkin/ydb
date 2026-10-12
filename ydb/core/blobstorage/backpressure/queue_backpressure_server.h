@@ -42,6 +42,17 @@ namespace NKikimr {
             typedef NBackpressure::TWindowStatus<TClientId> TWindowStatus;
             typedef NBackpressure::TFeedback<TClientId> TFeedback;
 
+            // Participants are counted before Fade/AdjustWindow, as used for budget distribution.
+            // These fields are valid only when Recalculated is true for the current operation.
+            struct TRecalculation {
+                bool Recalculated = false;
+                ui64 Active = 0;
+                ui64 Fading = 0;
+                ui64 Frozen = 0;
+                ui64 TotalCost = 0;
+                ui64 Low = 0;
+            };
+
             struct TMonitoringCounters {
                 NMonitoring::TDynamicCounters::TCounterPtr ActiveClients;
                 NMonitoring::TDynamicCounters::TCounterPtr FrozenTransitions;
@@ -274,6 +285,10 @@ namespace NKikimr {
                     UpdateStateCounter(now);
                 }
 
+                std::pair<ui64, ui64> GetWatermarks() const {
+                    return {LowWatermark, HighWatermark};
+                }
+
                 ui64 GetCost() const {
                     return Cost;
                 }
@@ -313,9 +328,11 @@ namespace NKikimr {
             TDuration WindowTimeout;
             TMonitoringCounters MonitoringCounters;
             ui64 ActiveClients = 0;
+            TRecalculation Recalculation;
 
 
             void ClearRecalculateCache() {
+                Recalculation = {};
                 // OtherWindowsStatusVecCache has to be clear on every call to Push/Processed,
                 // it filled in only sometimes, when CostChange is enough to make recalculation
                 OtherWindowsStatusVecCache.clear();
@@ -325,6 +342,7 @@ namespace NKikimr {
                 if (CostChange < CostChangeToRecalculate && !force)
                     return;
 
+                Recalculation.Recalculated = true;
                 ui64 actualCostChange = CostChange;
                 CostChange = 0;
                 ActiveWindowsCache.clear();
@@ -339,6 +357,7 @@ namespace NKikimr {
                     EWindowState windowState = wPtr->GetState(now);
                     switch (windowState) {
                         case EWindowState::Active: {
+                            ++Recalculation.Active;
                             ActiveWindowsCache.push_back(wPtr);
                             totalCost += wPtr->GetCost();
                             wPtr->Fade(windowState, actualCostChange, now);
@@ -346,6 +365,7 @@ namespace NKikimr {
                             break;
                         }
                         case EWindowState::Fading: {
+                            ++Recalculation.Fading;
                             // until frozen we use this window for recalculation
                             Y_ABORT_UNLESS(wPtr->GetCost() == 0);
                             ActiveWindowsCache.push_back(wPtr);
@@ -355,6 +375,7 @@ namespace NKikimr {
                             break;
                         }
                         case EWindowState::Frozen: {
+                            ++Recalculation.Frozen;
                             Y_ABORT_UNLESS(wPtr->GetCost() == 0);
                             wPtr->Fade(windowState, actualCostChange, now);
                             ++it;
@@ -371,6 +392,8 @@ namespace NKikimr {
                     }
                 }
 
+                Recalculation.TotalCost = totalCost;
+
                 // recalculate boundaries for active windows
                 size_t activeWindowsNum = ActiveWindowsCache.size();
                 if (MonitoringCounters.ActiveClients) {
@@ -386,6 +409,7 @@ namespace NKikimr {
                     ui64 lowWatermark = MaxCost / activeWindowsNum;
                     lowWatermark = Max(lowWatermark, MinLowWatermark);
                     lowWatermark = Min(lowWatermark, MaxLowWatermark);
+                    Recalculation.Low = lowWatermark;
 
                     // adjust active windows
                     for (auto &a : ActiveWindowsCache) {
@@ -436,6 +460,15 @@ namespace NKikimr {
                 if (MonitoringCounters.ActiveClients) {
                     *MonitoringCounters.ActiveClients -= ActiveClients;
                 }
+            }
+
+            const TRecalculation& GetRecalculation() const {
+                return Recalculation;
+            }
+
+            std::pair<ui64, ui64> GetWatermarks(const TActorId& actorId) const {
+                const auto it = AllWindows.find(actorId);
+                return it != AllWindows.end() ? it->second->GetWatermarks() : std::pair<ui64, ui64>{};
             }
 
             std::optional<TMessageId> GetExpectedMsgId(const TActorId& actorId) const {
