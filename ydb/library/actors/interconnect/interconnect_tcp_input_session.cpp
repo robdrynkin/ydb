@@ -1187,6 +1187,8 @@ namespace NActors {
                 ev.reset();
             }
             if (ev) {
+                LWPROBE(ReceiveEvent, NodeId, descr.Type, descr.Flags,
+                    LWACTORID(descr.Recipient), LWACTORID(descr.Sender), descr.Cookie, ev->GetSize(), ev->GetChannel());
                 // Give the direct-session interface a chance to consume the event via a registered
                 // receiver; otherwise fall back to normal actor-system delivery.
                 TAutoPtr<IEventHandle> evPtr(ev.release());
