@@ -532,9 +532,13 @@ namespace NKikimr {
             ::NMonitoring::TDynamicCounters::TCounterPtr SkeletonFrontOverflow;
             ::NMonitoring::TDynamicCounters::TCounterPtr SkeletonFrontIncorrectMsgId;
 
+            NMonitoring::TDynamicCounters::TCounterPtr WindowChangeSent;
+            NMonitoring::TDynamicCounters::TCounterPtr DropConnectionSent;
+
             void NotifyOtherClients(const TActorContext &ctx, const TFeedback &feedback) {
                 for (const auto &x : feedback.second) {
                     SendWindowChange(ctx, x, ExtQueueId);
+                    ++*WindowChangeSent;
                 }
             }
 
@@ -562,6 +566,8 @@ namespace NKikimr {
                 , SkeletonFrontDeadline(skeletonFrontGroup->GetCounter("SkeletonFront/" + name + "/Deadline", true))
                 , SkeletonFrontOverflow(skeletonFrontGroup->GetCounter("SkeletonFront/" + name + "/Overflow", true))
                 , SkeletonFrontIncorrectMsgId(skeletonFrontGroup->GetCounter("SkeletonFront/" + name + "/IncorrectMsgId", true))
+                , WindowChangeSent(skeletonFrontGroup->GetCounter("SkeletonFront/" + name + "/WindowChangeSent", true))
+                , DropConnectionSent(skeletonFrontGroup->GetCounter("SkeletonFront/" + name + "/DropConnectionSent", true))
             {
                 // recalculate window percents to cost
                 ui64 costChangeToRecalculate = totalCost * config->WindowCostChangeToRecalculatePercent / 100;
@@ -634,6 +640,7 @@ namespace NKikimr {
                 auto callback = [&](const auto& winp) {
                     ctx.Send(winp->ActorId, new TEvBlobStorage::TEvVWindowChange(ExtQueueId,
                         TEvBlobStorage::TEvVWindowChange::DropConnection));
+                    ++*DropConnectionSent;
                 };
                 QueueBackpressure->ForEachWindow(callback);
             }

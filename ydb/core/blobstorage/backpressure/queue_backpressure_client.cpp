@@ -37,6 +37,8 @@ class TVDiskBackpressureClientActor : public TActorBootstrapped<TVDiskBackpressu
     TString LogPrefix;
     const TString QueueName;
     const ::NMonitoring::TDynamicCounterPtr Counters;
+    NMonitoring::TDynamicCounters::TCounterPtr WindowChangeReceived;
+    NMonitoring::TDynamicCounters::TCounterPtr DropConnectionReceived;
     TBlobStorageQueue Queue;
     TActorId BlobStorageProxy;
     const TVDiskIdShort VDiskIdShort;
@@ -103,6 +105,8 @@ public:
         : BSProxyCtx(bspctx)
         , QueueName(queueName)
         , Counters(counters->GetSubgroup("queue", queueName))
+        , WindowChangeReceived(Counters->GetCounter("WindowChangeReceived", true, visibility))
+        , DropConnectionReceived(Counters->GetCounter("DropConnectionReceived", true, visibility))
         , Queue(Counters, LogPrefix, bspctx, clientId, interconnectChannel,
                 (info ? info->Type : TErasureType::ErasureNone), visibility, useActorSystemTime)
         , VDiskIdShort(vdiskId)
@@ -584,8 +588,13 @@ private:
             {"marker", "BSQ09"});
         auto record = ev->Get()->Record;
         if (record.GetDropConnection()) {
+            ++*DropConnectionReceived;
             ResetConnection(ctx, NKikimrProto::VDISK_ERROR_STATE, "VDisk disconnected due to error", TDuration::Seconds(10));
-        } else if (record.HasWindow()) {
+        } else {
+            ++*WindowChangeReceived;
+            if (!record.HasWindow()) {
+                return;
+            }
             const auto& window = record.GetWindow();
             HandleWindow(ctx, window);
             ResetWatchdogTimer(ctx.Now());

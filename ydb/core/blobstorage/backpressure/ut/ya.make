@@ -9,6 +9,7 @@ PEERDIR(
     library/cpp/svnversion
     ydb/core/base
     ydb/core/blobstorage/dsproxy/mock
+    ydb/core/blobstorage/vdisk
     ydb/core/testlib/actors
 )
 

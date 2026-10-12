@@ -11,6 +11,7 @@
 #include <ydb/core/blobstorage/vdisk/vdisk_actor.h>
 #include <ydb/core/blobstorage/vdisk/common/vdisk_config.h>
 #include <ydb/core/blobstorage/vdisk/common/vdisk_events.h>
+#include <ydb/library/pdisk_io/aio.h>
 #include <util/folder/tempdir.h>
 
 using namespace NKikimr;
@@ -100,6 +101,8 @@ public:
     void Handle(TEvProxyQueueState::TPtr& ev, const TActorContext& /*ctx*/) {
         if (ev->Get()->IsConnected) {
             ConnectedEvent.Signal();
+        } else {
+            DisconnectedEvent.Signal();
         }
     }
 
@@ -114,6 +117,7 @@ public:
         HFunc(TEvBlobStorage::TEvVGetResult, Handle)
     )
 
+    TAutoEvent DisconnectedEvent;
     TAutoEvent ConnectedEvent;
     TAutoEvent CompletedEvent;
     ui32 NumResponsesPending = 0;
@@ -123,6 +127,7 @@ class TQueueTestRuntime {
     TTempDir TempDir;
     TIntrusivePtr<::NMonitoring::TDynamicCounters> Counters;
     TIntrusivePtr<TBlobStorageGroupInfo> Info;
+    NPDisk::TIoContextFactoryOSS IoContext;
     std::unique_ptr<TActorSystem> ActorSystem;
     TString Path;
     ui64 DiskSize;
@@ -161,7 +166,7 @@ public:
         DiskSize = SectorMap->DeviceSize;
         PDiskGuid = 1;
         PDiskKey = 1;
-        MainKey = NPDisk::TMainKey{ .Keys = { 1 } };
+        MainKey = NPDisk::TMainKey{ .Keys = { 1 }, .IsInitialized = true };
         TFormatOptions options;
         options.SectorMap = SectorMap;
         options.EnableSmallDiskOptimization = false;
@@ -205,6 +210,8 @@ public:
             2,
             {});
         TIntrusivePtr<TVDiskConfig> vDiskConfig = new TVDiskConfig(baseInfo);
+        vDiskConfig->CostMetricsParametersByMedia = {
+            TCostMetricsParameters{200}, TCostMetricsParameters{50}, TCostMetricsParameters{32}};
 
         IActor* vDisk = CreateVDisk(vDiskConfig, Info, Counters);
         TActorSetupCmd vDiskSetup(vDisk, TMailboxType::Revolving, 0);
@@ -245,7 +252,15 @@ public:
         setup->LocalServices.emplace_back(loggerActorId, std::move(loggerActorCmd));
         AppData.reset(new TAppData(0, 1, 2, 1, TMap<TString, ui32>(), nullptr, nullptr, nullptr, nullptr));
 
+        AppData->IoContextFactory = &IoContext;
+        AppData->Counters = Counters;
         ActorSystem.reset(new TActorSystem{setup, AppData.get(), logSettings});
+    }
+
+    ~TQueueTestRuntime() {
+        if (ActorSystem) {
+            Stop();
+        }
     }
 
     void Start() {
@@ -262,11 +277,19 @@ public:
     }
 
     void WaitConnected() {
-        Proxy->ConnectedEvent.WaitI();
+        UNIT_ASSERT(Proxy->ConnectedEvent.WaitT(TDuration::Seconds(30)));
+    }
+
+    void WaitDisconnected() {
+        UNIT_ASSERT(Proxy->DisconnectedEvent.WaitT(TDuration::Seconds(30)));
+    }
+
+    auto GetQueueCounters() const {
+        return Counters->GetSubgroup("queue", "PutTabletLog");
     }
 
     void WaitCompleted() {
-        Proxy->CompletedEvent.WaitI();
+        UNIT_ASSERT(Proxy->CompletedEvent.WaitT(TDuration::Seconds(30)));
     }
 
     void Send(std::unique_ptr<IEventHandle>&& ev) {
@@ -287,6 +310,27 @@ public:
 };
 
 Y_UNIT_TEST_SUITE(TBlobStorageQueueTest) {
+
+    Y_UNIT_TEST(WindowChangeCounters) {
+        TQueueTestRuntime runtime{[](IEventHandle&) { return true; }};
+        runtime.Start();
+        runtime.WaitConnected();
+        auto counters = runtime.GetQueueCounters();
+        auto changes = counters->GetCounter("WindowChangeReceived", true);
+        auto drops = counters->GetCounter("DropConnectionReceived", true);
+        const auto changesBefore = changes->Val();
+        const auto dropsBefore = drops->Val();
+        auto update = std::make_unique<TEvBlobStorage::TEvVWindowChange>();
+        update->Record.MutableWindow()->SetMaxWindowSize(12345);
+        runtime.Send(std::make_unique<IEventHandle>(runtime.GetQueueActorId(), TActorId(), update.release()));
+        runtime.Send(std::make_unique<IEventHandle>(runtime.GetQueueActorId(), TActorId(),
+            new TEvBlobStorage::TEvVWindowChange(NKikimrBlobStorage::PutTabletLog,
+                TEvBlobStorage::TEvVWindowChange::DropConnection)));
+        runtime.WaitDisconnected(); // sent after both preceding events were handled
+        runtime.Stop();
+        UNIT_ASSERT_VALUES_EQUAL(changes->Val(), changesBefore + 1);
+        UNIT_ASSERT_VALUES_EQUAL(drops->Val(), dropsBefore + 1);
+    }
 
     Y_UNIT_TEST(TMessageLost) {
         // KIKIMR-9570 this test not is incorrect because we don't allow 'lost messages'
