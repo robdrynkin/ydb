@@ -574,7 +574,9 @@ namespace NKikimr {
 
                 QueueBackpressure = std::make_unique<TMyQueueBackpressure>(checkMsgId, totalCost, costChangeToRecalculate,
                     minLowWatermark, maxLowWatermark, percentThreshold, costChangeUntilFrozen, costChangeUntilDeath,
-                    config->WindowTimeout);
+                    config->WindowTimeout, TMyQueueBackpressure::TMonitoringCounters{
+                        skeletonFrontGroup->GetCounter("SkeletonFront/" + name + "/ActiveClients", false),
+                        skeletonFrontGroup->GetCounter("SkeletonFront/" + name + "/FrozenTransitions", true)});
             }
 
             void SetVDiskLogPrefix(const TString& logPrefix) {

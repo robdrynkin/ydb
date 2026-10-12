@@ -42,10 +42,16 @@ namespace NKikimr {
             typedef NBackpressure::TWindowStatus<TClientId> TWindowStatus;
             typedef NBackpressure::TFeedback<TClientId> TFeedback;
 
+            struct TMonitoringCounters {
+                NMonitoring::TDynamicCounters::TCounterPtr ActiveClients;
+                NMonitoring::TDynamicCounters::TCounterPtr FrozenTransitions;
+            };
+
             ////////////////////////////////////////////////////////////////////////////
             // Stat counters for window/total
             ////////////////////////////////////////////////////////////////////////////
             struct TStat : public TThrRefBase {
+                NMonitoring::TDynamicCounters::TCounterPtr FrozenTransitions;
                 ui64 NSuccess;
                 ui64 NWindowUpdate;
                 ui64 NProcessed;
@@ -113,6 +119,15 @@ namespace NKikimr {
                 TInstant LastActivityTime;
                 TDuration WindowTimeout;
                 ui64 InFlight;
+                EWindowState ObservedState = EWindowState::Unknown;
+
+                void UpdateStateCounter(TInstant now) {
+                    const auto state = GetState(now);
+                    if (state == EWindowState::Frozen && ObservedState != state && GlobalStatPtr->FrozenTransitions) {
+                        ++*GlobalStatPtr->FrozenTransitions;
+                    }
+                    ObservedState = state;
+                }
 
                 void SetStatus(TWindowStatus *ptr, EStatus status, bool notify, const TMessageId &failedMsgId = {}) {
                     const ui64 maxWindowSize = Min(LowWatermark, HighWatermark);
@@ -194,18 +209,20 @@ namespace NKikimr {
                         SetStatus(opStatus, NKikimrBlobStorage::TWindowFeedback::IncorrectMsgId, true, msgId);
                         GlobalStatPtr->IncIncorrectMsgId();
                     }
+                    UpdateStateCounter(now);
                 }
 
-                TWindowStatus *Processed(bool /*checkMsgId*/, const TMessageId& /*msgId*/, ui64 cost, TWindowStatus *opStatus) {
+                TWindowStatus *Processed(bool /*checkMsgId*/, const TMessageId& /*msgId*/, ui64 cost, TWindowStatus *opStatus, TInstant now) {
                     Y_ABORT_UNLESS(Cost >= cost);
                     Cost -= cost;
                     --InFlight;
                     SetStatus(opStatus, NKikimrBlobStorage::TWindowFeedback::Processed, true);
                     GlobalStatPtr->IncProcessed();
+                    UpdateStateCounter(now);
                     return opStatus;
                 }
 
-                TWindowStatus *AdjustWindow(ui64 lowWatermark, ui64 highWatermark, TWindowStatus *opStatus) {
+                TWindowStatus *AdjustWindow(ui64 lowWatermark, ui64 highWatermark, TWindowStatus *opStatus, TInstant now) {
                     // definitely notify client if it goes to receive rejects
                     bool notify = highWatermark < LowWatermark;
 
@@ -223,6 +240,7 @@ namespace NKikimr {
 
                     SetStatus(opStatus, NKikimrBlobStorage::TWindowFeedback::WindowUpdate, notify);
                     GlobalStatPtr->IncWindowUpdate();
+                    UpdateStateCounter(now);
                     return opStatus;
                 }
 
@@ -253,6 +271,7 @@ namespace NKikimr {
                         default: Y_ABORT("Unexpected case");
                     }
                     UpdateCountdown(costChange);
+                    UpdateStateCounter(now);
                 }
 
                 ui64 GetCost() const {
@@ -292,6 +311,8 @@ namespace NKikimr {
             TVector<TWindowStatus> OtherWindowsStatusVecCache;
             TStatPtr GlobalStatPtr;
             TDuration WindowTimeout;
+            TMonitoringCounters MonitoringCounters;
+            ui64 ActiveClients = 0;
 
 
             void ClearRecalculateCache() {
@@ -352,6 +373,10 @@ namespace NKikimr {
 
                 // recalculate boundaries for active windows
                 size_t activeWindowsNum = ActiveWindowsCache.size();
+                if (MonitoringCounters.ActiveClients) {
+                    *MonitoringCounters.ActiveClients += i64(activeWindowsNum) - i64(ActiveClients);
+                }
+                ActiveClients = activeWindowsNum;
                 if (activeWindowsNum) {
                     if (totalCost == 0) {
                         // if all windows are in fading mode totalCost can be 0
@@ -368,7 +393,7 @@ namespace NKikimr {
                         ui64 highWatermark = ui64(MaxCost) * ui64(a->GetCost()) / totalCost;
                         highWatermark = Max(highWatermark, lowWatermark); // highWatermark can be 0 for fading windows
                         // adjust window
-                        TWindowStatus *update = a->AdjustWindow(lowWatermark, highWatermark, &RecalculateStatusCache);
+                        TWindowStatus *update = a->AdjustWindow(lowWatermark, highWatermark, &RecalculateStatusCache, now);
                         if (update->Notify) {
                             if (a->ActorId == actorId) {
                                 StatusCache.WindowUpdate(*update);
@@ -384,7 +409,8 @@ namespace NKikimr {
             TQueueBackpressure(bool checkMsgId, ui64 maxCost = 100u, ui64 costChangeToRecalculate = 10u,
                                ui64 minLowWatermark = 2u, ui64 maxLowWatermark = 20u, ui64 percentThreshold = 10u,
                                ui64 costChangeUntilFrozen = 20u, ui64 costChangeUntilDeath = 30u,
-                               TDuration windowTimeout = TDuration::Seconds(20))
+                               TDuration windowTimeout = TDuration::Seconds(20),
+                               TMonitoringCounters monitoringCounters = {})
                 : CheckMsgId(checkMsgId)
                 , MaxCost(maxCost)
                 , CostChangeToRecalculate(costChangeToRecalculate)
@@ -401,7 +427,16 @@ namespace NKikimr {
                 , OtherWindowsStatusVecCache()
                 , GlobalStatPtr(new TStat())
                 , WindowTimeout(windowTimeout)
-            {}
+                , MonitoringCounters(std::move(monitoringCounters))
+            {
+                GlobalStatPtr->FrozenTransitions = MonitoringCounters.FrozenTransitions;
+            }
+
+            ~TQueueBackpressure() {
+                if (MonitoringCounters.ActiveClients) {
+                    *MonitoringCounters.ActiveClients -= ActiveClients;
+                }
+            }
 
             std::optional<TMessageId> GetExpectedMsgId(const TActorId& actorId) const {
                 if (const auto it = AllWindows.find(actorId); it != AllWindows.end()) {
@@ -449,7 +484,7 @@ namespace NKikimr {
 
                 TWindow &window = *(it->second);
                 // perform action
-                window.Processed(CheckMsgId, msgId, cost, &StatusCache);
+                window.Processed(CheckMsgId, msgId, cost, &StatusCache, now);
                 CostChange += cost;
                 Recalculate(actorId, false, now);
                 return TFeedback(StatusCache, OtherWindowsStatusVecCache);

@@ -15,6 +15,56 @@ namespace NKikimr {
         using namespace NBackpressure;
         using TFeedback = ::NKikimr::NBackpressure::TFeedback<ui64>;
 
+        Y_UNIT_TEST(WindowStateCounters) {
+            auto counters = MakeIntrusive<NMonitoring::TDynamicCounters>();
+            auto active = counters->GetCounter("ActiveClients", false);
+            auto frozen = counters->GetCounter("FrozenTransitions", true);
+            const TActorId actor(1, 1, 1, 1);
+            const auto now = TInstant::Seconds(1);
+            {
+                TQueueBackpressure<ui64> qb(true, 10, 1, 10, 10, 10, 2, 100,
+                    TDuration::Seconds(20), {active, frozen});
+                qb.Push(1, actor, TMessageId(0, 0), 1, now);
+                UNIT_ASSERT_VALUES_EQUAL(active->Val(), 1);
+                UNIT_ASSERT_VALUES_EQUAL(frozen->Val(), 0);
+                qb.Processed(actor, TMessageId(0, 0), 1, now);
+                UNIT_ASSERT_VALUES_EQUAL(frozen->Val(), 1);
+                // Other traffic recalculates the budget without thawing this window.
+                const TActorId other(1, 1, 2, 1);
+                qb.Push(2, other, TMessageId(0, 0), 1, now);
+                qb.Push(2, other, TMessageId(0, 1), 1, now);
+                UNIT_ASSERT_VALUES_EQUAL(active->Val(), 1);
+                UNIT_ASSERT_VALUES_EQUAL(frozen->Val(), 1);
+                qb.Push(1, actor, TMessageId(0, 1), 1, now);
+                UNIT_ASSERT_VALUES_EQUAL(active->Val(), 2);
+                qb.Processed(actor, TMessageId(0, 1), 1, now);
+                UNIT_ASSERT_VALUES_EQUAL(frozen->Val(), 2);
+            }
+            UNIT_ASSERT_VALUES_EQUAL(active->Val(), 0);
+            UNIT_ASSERT_VALUES_EQUAL(frozen->Val(), 2);
+        }
+
+        Y_UNIT_TEST(ActiveClientsIncludesFadingAndAggregatesQueues) {
+            auto counters = MakeIntrusive<NMonitoring::TDynamicCounters>();
+            auto active = counters->GetCounter("ActiveClients", false);
+            auto frozen = counters->GetCounter("FrozenTransitions", true);
+            const TActorId actor(1, 1, 1, 1);
+            const auto now = TInstant::Seconds(1);
+            TQueueBackpressure<ui64> first(true, 100, 0, 2, 20, 10, 20, 30,
+                TDuration::Seconds(20), {active, frozen});
+            first.Push(1, actor, TMessageId(0, 0), 1, now);
+            first.Processed(actor, TMessageId(0, 0), 1, now);
+            UNIT_ASSERT_VALUES_EQUAL(active->Val(), 1); // fading, still participates
+            {
+                TQueueBackpressure<ui64> second(true, 100, 0, 2, 20, 10, 20, 30,
+                    TDuration::Seconds(20), {active, frozen});
+                second.Push(1, actor, TMessageId(0, 0), 1, now);
+                UNIT_ASSERT_VALUES_EQUAL(active->Val(), 2);
+            }
+            UNIT_ASSERT_VALUES_EQUAL(active->Val(), 1);
+            UNIT_ASSERT_VALUES_EQUAL(frozen->Val(), 0);
+        }
+
         Y_UNIT_TEST(CreateDelete) {
             TQueueBackpressure<ui64> qb(true, 100u, 10u);
 
