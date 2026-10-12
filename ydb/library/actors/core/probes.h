@@ -8,6 +8,9 @@
 #define LWNAME_ACTORID(n) n "Raw1", n "Raw2", n "NodeId", n "PoolId"
 
 #define ACTORLIB_PROVIDER(PROBE, EVENT, GROUPS, TYPES, NAMES)                                                                         \
+    PROBE(EventDispatch, GROUPS("ActorLibDispatch"), \
+          TYPES(ui32, ui32, ui32, LWTYPE_ACTORID, LWTYPE_ACTORID, ui64), \
+          NAMES("poolId", "type", "originalType", LWNAME_ACTORID("r"), LWNAME_ACTORID("s"), "cookie")) \
     PROBE(SlowEvent, GROUPS("ActorLibSlow"),                                                                                          \
           TYPES(ui32, double, TString, TString, TString),                                                                             \
           NAMES("poolId", "eventMs", "eventType", "actorId", "actorType"))                                                            \

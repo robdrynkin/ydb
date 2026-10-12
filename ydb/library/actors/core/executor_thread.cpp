@@ -325,6 +325,8 @@ namespace NActors {
                         TlsThreadContext->ActivityContext.ElapsingActorActivity.store(activityType, std::memory_order_release);
                     }
 
+                    LWPROBE(EventDispatch, ThreadCtx.PoolId(), ev->GetTypeRewrite(), ev->Type,
+                        LWACTORID(CurrentRecipient), LWACTORID(ev->Sender), ev->Cookie);
                     actor->Receive(ev);
 
                     const ui64 systemFlags = actor->GetSystemFlags();
@@ -464,6 +466,8 @@ namespace NActors {
                 CurrentRecipient = recipient;
                 CurrentActorScheduledEventsCounter = 0;
 
+                LWPROBE(EventDispatch, ThreadCtx.PoolId(), ev->GetTypeRewrite(), ev->Type,
+                    LWACTORID(CurrentRecipient), LWACTORID(ev->Sender), ev->Cookie);
                 actor->Receive(ev);
 
                 finishActorEvent(
