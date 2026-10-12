@@ -13,6 +13,7 @@
 #include <ydb/core/blobstorage/vdisk/common/vdisk_events.h>
 #include <ydb/library/pdisk_io/aio.h>
 #include <util/folder/tempdir.h>
+#include <ydb/library/actors/testlib/lwtrace.h>
 
 using namespace NKikimr;
 using namespace NActors;
@@ -330,6 +331,49 @@ Y_UNIT_TEST_SUITE(TBlobStorageQueueTest) {
         runtime.Stop();
         UNIT_ASSERT_VALUES_EQUAL(changes->Val(), changesBefore + 1);
         UNIT_ASSERT_VALUES_EQUAL(drops->Val(), dropsBefore + 1);
+    }
+
+    Y_UNIT_TEST(RequestAndResponseTraceSnapshots) {
+        NActors::NTest::TProbeLog log("BLOBSTORAGE_PROVIDER", {"BSQueueClientState", "BSQueueServerOperation"});
+        TQueueTestRuntime runtime{[](IEventHandle&) { return true; }};
+        runtime.Start();
+        runtime.WaitConnected();
+        runtime.SetNumResponsesPending(1);
+        auto req = TEvBlobStorage::TEvVGet::CreateExtremeDataQuery(runtime.GetVDiskId(),
+            TInstant::Max(), NKikimrBlobStorage::EGetHandleClass::AsyncRead,
+            TEvBlobStorage::TEvVGet::EFlags::None, {}, {TLogoBlobID(1, 1, 1, 0, 10, 0)});
+        runtime.Send(std::make_unique<IEventHandle>(runtime.GetQueueActorId(), runtime.GetProxyActorId(),
+            req.release(), 0, 123));
+        runtime.WaitCompleted();
+        runtime.Stop();
+        ui32 enqueued = 0, replied = 0, requested = 0, completed = 0;
+        for (const auto& row : log.Read()) {
+            const auto& p = row.Params;
+            if (row.Probe == "BSQueueClientState" && p.at("operation") == "enqueue") {
+                ++enqueued;
+                UNIT_ASSERT_VALUES_EQUAL(p.at("type"), ToString(ui32(TEvBlobStorage::EvVGet)));
+                UNIT_ASSERT_VALUES_EQUAL(p.at("cookie"), "123");
+                UNIT_ASSERT_VALUES_EQUAL(p.at("waiting"), "1");
+                UNIT_ASSERT_VALUES_EQUAL(p.at("inFlight"), "0");
+            } else if (row.Probe == "BSQueueClientState" && p.at("operation") == "response") {
+                ++replied;
+                UNIT_ASSERT_VALUES_EQUAL(p.at("waiting"), "0");
+                UNIT_ASSERT_VALUES_EQUAL(p.at("inFlight"), "0");
+                UNIT_ASSERT_VALUES_EQUAL(p.at("inFlightBytes"), "0");
+                UNIT_ASSERT_VALUES_EQUAL(p.at("inFlightCost"), "0");
+            } else if (row.Probe == "BSQueueServerOperation" && p.at("operation") == "request") {
+                ++requested;
+                UNIT_ASSERT_VALUES_EQUAL(p.at("active"), "1");
+                UNIT_ASSERT_VALUES_EQUAL(p.at("type"), ToString(ui32(TEvBlobStorage::EvVGet)));
+            } else if (row.Probe == "BSQueueServerOperation" && p.at("operation") == "completion") {
+                ++completed;
+                UNIT_ASSERT_VALUES_EQUAL(p.at("clientCost"), "0");
+            }
+        }
+        UNIT_ASSERT_VALUES_EQUAL(enqueued, 1);
+        UNIT_ASSERT_VALUES_EQUAL(replied, 1);
+        UNIT_ASSERT_VALUES_EQUAL(requested, 1);
+        UNIT_ASSERT_VALUES_EQUAL(completed, 1);
     }
 
     Y_UNIT_TEST(TMessageLost) {

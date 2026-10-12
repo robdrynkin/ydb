@@ -10,6 +10,7 @@
 #include <library/cpp/testing/unittest/registar.h>
 
 #include <util/system/event.h>
+#include <ydb/library/actors/testlib/lwtrace.h>
 
 using namespace NActors;
 
@@ -106,6 +107,22 @@ Y_UNIT_TEST_SUITE(TActorSystemTest) {
 
         actorSystem.Stop();
         return undeliveredSender;
+    }
+
+    Y_UNIT_TEST(EventDispatchTraceWithoutOrbit) {
+        NTest::TProbeLog log("ACTORLIB_PROVIDER", {"EventDispatch"});
+        GetUndeliveredSender(IEventHandle::FlagTrackDelivery);
+        ui32 found = 0;
+        for (const auto& row : log.Read()) {
+            if (row.Params.at("type") == ToString(ui32(TEvents::TSystem::Undelivered))) {
+                ++found;
+                UNIT_ASSERT_VALUES_EQUAL(row.Params.at("originalType"), ToString(ui32(TEvents::TSystem::Undelivered)));
+                UNIT_ASSERT_VALUES_EQUAL(row.Params.at("poolId"), "0");
+                UNIT_ASSERT_VALUES_EQUAL(row.Params.at("sNodeId"), ToString(NodeWithoutProxy));
+                UNIT_ASSERT_VALUES_EQUAL(row.Params.at("rNodeId"), ToString(SelfNodeId));
+            }
+        }
+        UNIT_ASSERT_VALUES_EQUAL(found, 1);
     }
 
     Y_UNIT_TEST(UndeliveredKeepsRecipientNodeId) {

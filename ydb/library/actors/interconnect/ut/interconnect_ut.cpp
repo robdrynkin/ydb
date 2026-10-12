@@ -12,6 +12,8 @@
 #include <library/cpp/monlib/dynamic_counters/counters.h>
 #include <library/cpp/testing/unittest/registar.h>
 #include <library/cpp/digest/md5/md5.h>
+#include <ydb/library/actors/testlib/lwtrace.h>
+#include <util/system/event.h>
 #include <atomic>
 #include <cstring>
 #include <memory>
@@ -1362,6 +1364,58 @@ void RunSubscriberLivenessCheck(bool useSessionV2, TDuration checkInterval) {
 } // namespace
 
 Y_UNIT_TEST_SUITE(Interconnect) {
+
+    Y_UNIT_TEST(EventTraceWithoutOrbit) {
+        NTest::TProbeLog log("ACTORLIB_PROVIDER", {"ForwardEvent", "ReceiveEvent"});
+        TManualEvent done;
+        TActorId sender;
+        TActorId recipient;
+        {
+            TTestICCluster cluster(2, TChannelsConfig(), nullptr, nullptr, TTestICCluster::DISABLE_RDMA);
+            class TReceiver : public TActorBootstrapped<TReceiver> {
+                TManualEvent& Done;
+            public:
+                explicit TReceiver(TManualEvent& done) : Done(done) {}
+                void Bootstrap() { Become(&TThis::StateWork); }
+                STATEFN(StateWork) {
+                    if (ev->GetTypeRewrite() == TEvOversizedTcpEvent::EventType) {
+                        Done.Signal();
+                    }
+                }
+            };
+            class TSender : public TActorBootstrapped<TSender> {
+                TActorId Recipient;
+            public:
+                explicit TSender(TActorId recipient) : Recipient(recipient) {}
+                void Bootstrap() {
+                    auto* event = new TEvOversizedTcpEvent;
+                    event->Record.SetBuffer("trace-test");
+                    Send(Recipient, event, IEventHandle::MakeFlags(3, 0), 456);
+                }
+            };
+            recipient = cluster.RegisterActor(new TReceiver(done), 1);
+            sender = cluster.RegisterActor(new TSender(recipient), 2);
+            UNIT_ASSERT(done.WaitT(TDuration::Seconds(30)));
+        }
+        ui32 sent = 0, received = 0;
+        for (const auto& row : log.Read()) {
+            const auto& p = row.Params;
+            if (p.at("type") != ToString(ui32(TEvOversizedTcpEvent::EventType))) {
+                continue;
+            }
+            row.Probe == "ForwardEvent" ? ++sent : ++received;
+            UNIT_ASSERT_VALUES_EQUAL(p.at("channelId"), "3");
+            UNIT_ASSERT_VALUES_EQUAL(p.at("cookie"), "456");
+            UNIT_ASSERT_VALUES_EQUAL(p.at("rRaw1"), ToString(recipient.RawX1()));
+            UNIT_ASSERT_VALUES_EQUAL(p.at("sRaw1"), ToString(sender.RawX1()));
+            UNIT_ASSERT_VALUES_EQUAL(p.at("rRaw2"), ToString(recipient.RawX2()));
+            UNIT_ASSERT_VALUES_EQUAL(p.at("sRaw2"), ToString(sender.RawX2()));
+            UNIT_ASSERT_VALUES_EQUAL(p.at("peerId"), row.Probe == "ForwardEvent" ? "1" : "2");
+            UNIT_ASSERT(FromString<ui64>(p.at("eventSerializedSize")) > 0);
+        }
+        UNIT_ASSERT_VALUES_EQUAL(sent, 1);
+        UNIT_ASSERT_VALUES_EQUAL(received, 1);
+    }
 
     Y_UNIT_TEST(ProcessUndeliveredAfterOversizedTcpEvent) {
         TTestICCluster cluster(2, TChannelsConfig(), nullptr, nullptr, TTestICCluster::DISABLE_RDMA);
