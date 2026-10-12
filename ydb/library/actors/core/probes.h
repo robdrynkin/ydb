@@ -79,9 +79,13 @@
           NAMES("timeUs", "timerfd_expirations", "eventsGottenFromQueues", "eventsSent",                                              \
                 "eventsInSendQueue", "eventSchedulingErrorUs"))                                                                       \
     PROBE(ForwardEvent, GROUPS("Orbit", "InterconnectSessionTCP"),                                                                    \
-          TYPES(ui32, ui32, ui32, LWTYPE_ACTORID, LWTYPE_ACTORID, ui64, ui32),                                                        \
+          TYPES(ui32, ui32, ui32, LWTYPE_ACTORID, LWTYPE_ACTORID, ui64, ui32, ui16),                                                        \
           NAMES("peerId", "type", "flags", LWNAME_ACTORID("r"), LWNAME_ACTORID("s"),                                                  \
-                "cookie", "eventSerializedSize"))                                                                                     \
+                "cookie", "eventSerializedSize", "channelId"))                                                                                     \
+    PROBE(ReceiveEvent, GROUPS("InterconnectSessionTCP"), \
+          TYPES(ui32, ui32, ui32, LWTYPE_ACTORID, LWTYPE_ACTORID, ui64, ui64, ui16), \
+          NAMES("peerId", "type", "flags", LWNAME_ACTORID("r"), LWNAME_ACTORID("s"), \
+                "cookie", "eventSerializedSize", "channelId")) \
     PROBE(EnqueueEvent, GROUPS("InterconnectSessionTCP"),                                                                             \
           TYPES(ui32, ui64, TDuration, ui16, ui64, ui64),                                                                             \
           NAMES("peerId", "numEventsInReadyChannels", "enqueueBlockedTotalMs", "channelId", "queueSizeInEvents", "queueSizeInBytes")) \
