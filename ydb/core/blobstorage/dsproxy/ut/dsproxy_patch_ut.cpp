@@ -70,7 +70,6 @@ struct TTestArgs {
     TBlobStorageGroupType GType;
     ui32 MaskForCookieBruteForcing;
 
-    bool EnableVPatchForTesting = false;
     ui32 StatusFlags = 1;
     float ApproximateFreeSpaceShare = 0.1;
     TVector<TVector<ui64>> PartPlacement;
@@ -128,7 +127,7 @@ struct TTestArgs {
         MaskForCookieBruteForcing = (Max<ui32>() << 17) & TLogoBlobID::MaxCookie;
         if (goodPatchedId) {
             UNIT_ASSERT(TEvBlobStorage::TEvPatch::GetBlobIdWithSamePlacement(OriginalId, &PatchedId,
-                    MaskForCookieBruteForcing, OriginalGroupId, CurrentGroupId));
+                    MaskForCookieBruteForcing, OriginalGroupId, CurrentGroupId, GType));
         }
     }
 };
@@ -617,7 +616,7 @@ void RunMovedPatchTest(TTestBasicRuntime &runtime, const TTestArgs &args, EMoved
     TDSProxyEnv env;
     env.Configure(runtime, args.GType, args.CurrentGroupId, 0, TBlobStorageGroupInfo::EEM_NONE);
     TEvBlobStorage::TEvPatch::TPtr patch = CreatePatch(runtime, env, args);
-    std::unique_ptr<IActor> patchActor = env.CreatePatchRequestActor(patch, true, args.EnableVPatchForTesting);
+    std::unique_ptr<IActor> patchActor = env.CreatePatchRequestActor(patch, true);
     runtime.Register(patchActor.release(), 0, 0, TMailboxType::Simple, 0, env.FakeProxyActorId);
     ConductMovedPatch(runtime, env, args, movedCase);
 }
@@ -652,7 +651,7 @@ void SetLogPriorities(TTestBasicRuntime &runtime) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-class TMirror3dcVPatchActorTest {
+class TVPatchActorTest {
     struct TDiffEvents {
         ui32 SelectedMask = 0;
         ui32 ForceEndMask = 0;
@@ -679,7 +678,13 @@ class TMirror3dcVPatchActorTest {
                 Args.OriginalId, Args.PatchedId, vdisk, record.GetCookie(), Runtime.GetCurrentTime(), "", &record,
                 nullptr, nullptr, nullptr, 0);
             if (availableMask & ui32{1} << subgroupIdx) {
-                foundParts->AddPart(subgroupIdx % 3 + 1);
+                if (Args.GType.GetErasure() == TErasureType::ErasureMirror3dc) {
+                    foundParts->AddPart(subgroupIdx % 3 + 1);
+                } else {
+                    for (ui32 partId : Args.PartPlacement[subgroupIdx]) {
+                        foundParts->AddPart(partId);
+                    }
+                }
             }
             SendByHandle(Runtime, start, std::move(foundParts));
         }
@@ -701,6 +706,14 @@ class TMirror3dcVPatchActorTest {
                 result.ForceEndMask |= bit;
             } else {
                 result.SelectedMask |= bit;
+                if (Args.GType.ErasureFamily() == TErasureType::ErasureParityBlock) {
+                    const ui32 partId = LogoBlobIDFromLogoBlobID(diff->Get()->Record.GetOriginalPartBlobId()).PartId();
+                    UNIT_ASSERT_VALUES_EQUAL(Args.PartPlacement[subgroupIdx].size(), 1);
+                    UNIT_ASSERT_VALUES_EQUAL(partId, Args.PartPlacement[subgroupIdx].front());
+                    UNIT_ASSERT_VALUES_EQUAL(diff->Get()->GetExpectedXorDiffs(),
+                        partId > Args.GType.DataParts() ? Args.GType.DataParts() : 0);
+                    UNIT_ASSERT_VALUES_EQUAL(diff->Get()->Record.XorReceiversSize(), Args.GType.ParityParts());
+                }
                 result.Selected.push_back(std::move(diff));
             }
         }
@@ -717,15 +730,38 @@ class TMirror3dcVPatchActorTest {
     }
 
 public:
-    TMirror3dcVPatchActorTest(const TVector<EMirror3dcFailRealmState>& realms = {}) {
-        Args.MakeDefault(TErasureType::ErasureMirror3dc);
+    TVPatchActorTest(const TVector<EMirror3dcFailRealmState>& realms = {},
+            TErasureType::EErasureSpecies erasure = TErasureType::ErasureMirror3dc, bool samePlacement = true) {
+        Args.MakeDefault(erasure);
+        if (Args.GType.ErasureFamily() == TErasureType::ErasureParityBlock) {
+            for (ui32 cookie = 0; ; ++cookie) {
+                UNIT_ASSERT_LE(cookie, TLogoBlobID::MaxCookie);
+                TLogoBlobID id(1, 3, 3, 4, Args.Buffer.size(), cookie);
+                const bool sameLegacyPlacement = TEvBlobStorage::TEvPatch::BlobPlacementKind(id) ==
+                    TEvBlobStorage::TEvPatch::BlobPlacementKind(Args.OriginalId);
+                const bool sameTypedPlacement = TEvBlobStorage::TEvPatch::BlobPlacementKind(id, Args.GType) ==
+                    TEvBlobStorage::TEvPatch::BlobPlacementKind(Args.OriginalId, Args.GType);
+                if (sameTypedPlacement == samePlacement
+                        && sameLegacyPlacement == (!samePlacement || erasure != TErasureType::Erasure8Plus2Block)) {
+                    Args.PatchedId = id;
+                    break;
+                }
+            }
+        }
         SetLogPriorities(Runtime);
         SetupRuntime(Runtime);
         Env.Configure(Runtime, Args.GType, Args.CurrentGroupId, 0, TBlobStorageGroupInfo::EEM_NONE,
             DormantTimeoutDefaultControl, false, realms);
     }
 
-    TDiffEvents Start(ui32 availableMask) {
+    TDiffEvents Start(ui32 availableMask, ui32 handoffParts = 0) {
+        ui32 handoff = Args.GType.TotalPartCount();
+        for (ui32 part = 0; part < Args.GType.TotalPartCount(); ++part) {
+            if (handoffParts & (1u << part)) {
+                UNIT_ASSERT_LT(handoff, Args.PartPlacement.size());
+                Args.PartPlacement[handoff++].swap(Args.PartPlacement[part]);
+            }
+        }
         auto patch = CreatePatch(Runtime, Env, Args);
         auto patchActor = Env.CreatePatchRequestActor(patch, true, true);
         PatchActorId = Runtime.Register(patchActor.release(), 0, 0, TMailboxType::Simple, 0, Env.FakeProxyActorId);
@@ -759,6 +795,17 @@ public:
         ConductFallbackPatch(Runtime, Args);
     }
 
+    void CheckMovedFallback(TErasureType::ECrcMode crcMode = TErasureType::CrcModeNone) {
+        for (auto* id : {&Args.OriginalId, &Args.PatchedId}) {
+            *id = TLogoBlobID::Make(id->TabletID(), id->Generation(), id->Step(), id->Channel(),
+                id->BlobSize(), id->Cookie(), crcMode);
+        }
+        auto patch = CreatePatch(Runtime, Env, Args);
+        auto patchActor = Env.CreatePatchRequestActor(patch, true, true);
+        Runtime.Register(patchActor.release(), 0, 0, TMailboxType::Simple, 0, Env.FakeProxyActorId);
+        ConductFallbackPatch(Runtime, Args);
+    }
+
     void CheckNaiveFallback(bool enableVPatchForTesting) {
         auto patch = CreatePatch(Runtime, Env, Args);
         auto patchActor = Env.CreatePatchRequestActor(patch, true, enableVPatchForTesting);
@@ -780,7 +827,7 @@ Y_UNIT_TEST_SUITE(TVPatchMirror3dcActorTest) {
                     }
                     // Exercise both VPatch and VMovedPatch entry paths.
                     for (const bool enableVPatchForTesting : {false, true}) {
-                        TMirror3dcVPatchActorTest test({first, second, third});
+                        TVPatchActorTest test({first, second, third});
                         test.CheckNaiveFallback(enableVPatchForTesting);
                     }
                 }
@@ -790,14 +837,14 @@ Y_UNIT_TEST_SUITE(TVPatchMirror3dcActorTest) {
 
     Y_UNIT_TEST(MixedNormalRealmsKeepVPatch) {
         using R = NKikimrBlobStorage::TGroupInfo::TFailRealm;
-        TMirror3dcVPatchActorTest test({R::N0, R::N1, R::N2});
+        TVPatchActorTest test({R::N0, R::N1, R::N2});
         const auto events = test.Start(0b000000111);
         UNIT_ASSERT_VALUES_EQUAL(events.SelectedMask, 0b000000111);
         test.CompleteSuccessfully(events);
     }
 
     Y_UNIT_TEST(SelectsOneReplicaFromEachRealm) {
-        TMirror3dcVPatchActorTest test;
+        TVPatchActorTest test;
         const auto events = test.Start(0b000000111); // 1+1+1
         UNIT_ASSERT_VALUES_EQUAL(events.SelectedMask, 0b000000111);
         UNIT_ASSERT_VALUES_EQUAL(events.ForceEndMask, 0);
@@ -805,7 +852,7 @@ Y_UNIT_TEST_SUITE(TVPatchMirror3dcActorTest) {
     }
 
     Y_UNIT_TEST(SelectsTwoReplicasFromTwoRealms) {
-        TMirror3dcVPatchActorTest test;
+        TVPatchActorTest test;
         const auto events = test.Start(0b000011011); // 2+2
         UNIT_ASSERT_VALUES_EQUAL(events.SelectedMask, 0b000011011);
         UNIT_ASSERT_VALUES_EQUAL(events.ForceEndMask, 0);
@@ -813,7 +860,7 @@ Y_UNIT_TEST_SUITE(TVPatchMirror3dcActorTest) {
     }
 
     Y_UNIT_TEST(FallsBackWithoutQuorum) {
-        TMirror3dcVPatchActorTest test;
+        TVPatchActorTest test;
         const auto events = test.Start(0b000001011); // 2+1
         UNIT_ASSERT_VALUES_EQUAL(events.SelectedMask, 0);
         UNIT_ASSERT_VALUES_EQUAL(events.ForceEndMask, 0b000001011);
@@ -821,7 +868,7 @@ Y_UNIT_TEST_SUITE(TVPatchMirror3dcActorTest) {
     }
 
     Y_UNIT_TEST(FallsBackOnSelectedVDiskError) {
-        TMirror3dcVPatchActorTest test;
+        TVPatchActorTest test;
         const auto events = test.Start(0b000011111); // 2+2+1
         UNIT_ASSERT_VALUES_EQUAL(events.SelectedMask, 0b000011100); // 1+1+1
         UNIT_ASSERT_VALUES_EQUAL(events.ForceEndMask, 0b000000011);
@@ -836,11 +883,10 @@ Y_UNIT_TEST_SUITE(TDSProxyPatchTest) {
 template <typename ECase>
 void RunGeneralTest(void(*runner)(TTestBasicRuntime &runtime, const TTestArgs &args, ECase testCase),
         TErasureType::TErasureType::EErasureSpecies erasure,
-        ECase testCase, bool enableVPatchForTesting = false)
+        ECase testCase)
 {
     TTestArgs args;
     args.MakeDefault(erasure, true);
-    args.EnableVPatchForTesting = enableVPatchForTesting;
     TTestBasicRuntime runtime(1, false);
     SetLogPriorities(runtime);
     SetupRuntime(runtime);
@@ -894,8 +940,78 @@ void RunGeneralTest(void(*runner)(TTestBasicRuntime &runtime, const TTestArgs &a
     Y_UNIT_TEST_PATCH_PACK(Erasure4Plus2Block)
     Y_UNIT_TEST_PATCH_PACK(Erasure8Plus2Block)
 
-    Y_UNIT_TEST(MovedFallbackBlock82WithFastPathEnabled) {
-        RunGeneralTest(RunMovedPatchTest, TErasureType::Erasure8Plus2Block, EMovedPatchCase::Ok, true);
+    Y_UNIT_TEST(PatchBlobIdPlacement) {
+        for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+            const TBlobStorageGroupInfo info(erasure, 1, TBlobStorageGroupType(erasure).BlobSubgroupSize());
+            const TLogoBlobID original(1, 2, 3, 4, 1000, 5);
+            TLogoBlobID patched(1, 3, 3, 4, 1000, 0x123400);
+            constexpr ui32 mask = 0xff;
+            UNIT_ASSERT(TEvBlobStorage::TEvPatch::GetBlobIdWithSamePlacement(original, &patched,
+                mask, 0, 0, erasure));
+            UNIT_ASSERT_VALUES_EQUAL(patched.Cookie() & ~mask, 0x123400);
+            TBlobStorageGroupInfo::TVDiskIds originalDisks, patchedDisks;
+            info.PickSubgroup(original.Hash(), &originalDisks, nullptr);
+            info.PickSubgroup(patched.Hash(), &patchedDisks, nullptr);
+            UNIT_ASSERT(originalDisks == patchedDisks);
+            const auto saved = patched;
+            UNIT_ASSERT(!TEvBlobStorage::TEvPatch::GetBlobIdWithSamePlacement(original, &patched,
+                mask, 0, 1, erasure));
+            UNIT_ASSERT(patched == saved);
+        }
+    }
+
+    Y_UNIT_TEST(DistributedParityBlock) {
+        for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+            TVPatchActorTest test({}, erasure);
+            const ui32 mask = (1u << TBlobStorageGroupType(erasure).TotalPartCount()) - 1;
+            const auto events = test.Start(mask);
+            UNIT_ASSERT_VALUES_EQUAL(events.SelectedMask, mask);
+            UNIT_ASSERT_VALUES_EQUAL(events.ForceEndMask, 0);
+            test.CompleteSuccessfully(events);
+        }
+    }
+
+    Y_UNIT_TEST(DistributedParityBlockHandoffs) {
+        for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+            TVPatchActorTest test({}, erasure);
+            const ui32 total = TBlobStorageGroupType(erasure).TotalPartCount();
+            const ui32 moved = 1u | (1u << (total - 1));
+            const ui32 mask = ((1u << total) - 1) ^ moved ^ (3u << total);
+            const auto events = test.Start(mask, moved);
+            UNIT_ASSERT_VALUES_EQUAL(events.SelectedMask, mask);
+            test.CompleteSuccessfully(events);
+        }
+    }
+
+    Y_UNIT_TEST(DistributedParityBlockMissingPartFallback) {
+        for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+            TVPatchActorTest test({}, erasure);
+            const ui32 mask = (1u << (TBlobStorageGroupType(erasure).TotalPartCount() - 1)) - 1;
+            const auto events = test.Start(mask);
+            UNIT_ASSERT_VALUES_EQUAL(events.SelectedMask, 0);
+            UNIT_ASSERT_VALUES_EQUAL(events.ForceEndMask, mask);
+            test.CompleteFallback();
+        }
+    }
+
+    Y_UNIT_TEST(DistributedParityBlockErrorFallback) {
+        for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+            TVPatchActorTest test({}, erasure);
+            const auto events = test.Start((1u << TBlobStorageGroupType(erasure).TotalPartCount()) - 1);
+            test.FailAndFallback(events);
+        }
+    }
+
+    Y_UNIT_TEST(DistributedParityBlockCrcFallback) {
+        for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+            TVPatchActorTest test({}, erasure);
+            test.CheckMovedFallback(TErasureType::CrcModeWholePart);
+        }
+    }
+
+    Y_UNIT_TEST(DistributedBlock82DifferentPlacementFallback) {
+        TVPatchActorTest test({}, TErasureType::Erasure8Plus2Block, false);
+        test.CheckMovedFallback();
     }
     Y_UNIT_TEST_PATCH_PACK(ErasureMirror3dc)
 

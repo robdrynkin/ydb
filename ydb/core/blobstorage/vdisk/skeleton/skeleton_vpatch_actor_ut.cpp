@@ -424,20 +424,6 @@ namespace NKikimr {
             testData.WaitEndTest();
         }
 
-        Y_UNIT_TEST(RejectsDistributedPatchBlock82) {
-            TVPatchTestGeneralData testData(TErasureType::Erasure8Plus2Block, 10);
-            auto edge = testData.EdgeActors[0];
-            auto ev = CreateEventHandle(edge, edge, testData.CreateVPatchStart(0));
-            auto actor = testData.CreateTVPatchActor<TVPatchDecorator>(std::move(ev));
-            TAutoPtr<IEventHandle> handle;
-            auto result = testData.Runtime.GrabEdgeEventRethrow<TEvBlobStorage::TEvVPatchFoundParts>(handle);
-            UNIT_ASSERT_VALUES_EQUAL(result->Record.GetStatus(), NKikimrProto::ERROR);
-            auto dying = testData.Runtime.GrabEdgeEventRethrow<TEvVPatchDyingRequest>(handle);
-            UNIT_ASSERT_VALUES_EQUAL(dying->PatchedBlobId, testData.PatchedBlobId);
-            testData.Runtime.Send(new IEventHandle(actor, edge, new TEvVPatchDyingConfirm));
-            testData.WaitEndTest();
-        }
-
         Y_UNIT_TEST(FiniteDeadlineIsPreserved) {
             TBlobStorageGroupType type(TErasureType::Erasure4Plus2Block);
             TVPatchTestGeneralData testData(type, 10);
@@ -492,7 +478,8 @@ namespace NKikimr {
             TActorId vPatchActorId = testData.VPatchActorIds[nodeId];
 
             TAutoPtr<IEventHandle> handle;
-            auto vPut = runtime.GrabEdgeEventRethrow<TEvBlobStorage::TEvVPut>(handle);
+            auto vPutHandle = runtime.GrabEdgeEventRethrow<TEvBlobStorage::TEvVPut>({edgeActor});
+            auto vPut = vPutHandle->Get();
             NKikimrBlobStorage::TEvVPut &record = vPut->Record;
 
             UNIT_ASSERT(record.HasCookie());
@@ -772,6 +759,7 @@ namespace NKikimr {
         {
             ui32 nodeCount = type.TotalPartCount();
             TVPatchTestGeneralData testData(type, data.size(), nodeCount);
+            testData.Deadline = testData.Now + TDuration::Seconds(5);
 
             for (ui32 nodeIdx = 0; nodeIdx < nodeCount; ++nodeIdx) {
                 std::unique_ptr<TEvBlobStorage::TEvVPatchStart> start = testData.CreateVPatchStart(nodeIdx, nodeIdx);
@@ -909,12 +897,19 @@ namespace NKikimr {
                 PassStoringPart(testData, NKikimrProto::OK, storingBlob, partIdx);
             }
 
-            testData.ForceEndTest();
-            Y_UNUSED(partSet, resultPartSet, diffSet);
+            for (ui32 partIdx = 0; partIdx < totalPartCount; ++partIdx) {
+                auto edge = testData.EdgeActors[partIdx];
+                auto result = testData.Runtime.GrabEdgeEventRethrow<TEvBlobStorage::TEvVPatchResult>({edge});
+                UNIT_ASSERT_VALUES_EQUAL(result->Get()->Record.GetStatus(), NKikimrProto::OK);
+                auto dying = testData.Runtime.GrabEdgeEventRethrow<TEvVPatchDyingRequest>({edge});
+                UNIT_ASSERT_VALUES_EQUAL(dying->Get()->PatchedBlobId, testData.PatchedBlobId);
+                testData.Runtime.Send(new IEventHandle(testData.VPatchActorIds[partIdx], edge,
+                    new TEvVPatchDyingConfirm), partIdx);
+            }
+            testData.WaitEndTest();
         }
 
        Y_UNIT_TEST(FullPatchTest) {
-            return;
             ui32 dataSize = 2079;
             TString data = TString::Uninitialized(dataSize);
             Fill(data.begin(), data.vend(), 'a');
@@ -932,12 +927,12 @@ namespace NKikimr {
                 left += diffSize + 1;
             }
 
-            TBlobStorageGroupType type(TErasureType::Erasure4Plus2Block);
-            MakeFullVPatchTest(type, data, diffs);
+            for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+                MakeFullVPatchTest(erasure, data, diffs);
+            }
         }
 
        Y_UNIT_TEST(FullPatchTestXorDiffFasterVGetResult) {
-            return;
             ui32 dataSize = 2079;
             TString data = TString::Uninitialized(dataSize);
             Fill(data.begin(), data.vend(), 'a');
@@ -955,12 +950,26 @@ namespace NKikimr {
                 left += diffSize + 1;
             }
 
-            TBlobStorageGroupType type(TErasureType::Erasure4Plus2Block);
-            MakeFullVPatchTest(type, data, diffs, true);
+            for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+                MakeFullVPatchTest(erasure, data, diffs, true);
+            }
+        }
+
+        Y_UNIT_TEST(FullPatchBlock82) {
+            for (ui32 size : {1, 79, 80, 81, 639, 640, 641, 2079, 65537}) {
+                TString data = TString::Uninitialized(size);
+                for (ui32 i = 0; i < size; ++i) {
+                    data[i] = i * 37;
+                }
+                TVector<TDiff> diffs;
+                diffs.emplace_back(TString(size, 'b'), 0);
+                for (bool quickXorDiffs : {false, true}) {
+                    MakeFullVPatchTest(TErasureType::Erasure8Plus2Block, data, diffs, quickXorDiffs);
+                }
+            }
         }
 
        Y_UNIT_TEST(FullPatchTestSpecialCase1) {
-            return;
             ui32 dataSize = 100;
             TString data = TString::Uninitialized(dataSize);
             Fill(data.begin(), data.vend(), 'a');
@@ -970,8 +979,9 @@ namespace NKikimr {
             diffs.emplace_back("b", 0);
             diffs.emplace_back("b", 99);
 
-            TBlobStorageGroupType type(TErasureType::Erasure4Plus2Block);
-            MakeFullVPatchTest(type, data, diffs, true);
+            for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+                MakeFullVPatchTest(erasure, data, diffs, true);
+            }
         }
     }
 

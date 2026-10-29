@@ -1256,6 +1256,31 @@ Y_UNIT_TEST(TestWriteReadDeleteWithRestartsThenResponseOk) {
     });
 }
 
+Y_UNIT_TEST(PatchedBlobIdPlacement) {
+    struct TState : NKeyValue::TKeyValueState {
+        TState(TBlobStorageGroupType type) {
+            TabletId = 1;
+            ExecutorGeneration = 2;
+            auto info = MakeIntrusive<TTabletStorageInfo>();
+            info->Channels.emplace_back(0, type);
+            SetTabletInfo(info.Get());
+        }
+    };
+    for (auto erasure : {TErasureType::Erasure4Plus2Block, TErasureType::Erasure8Plus2Block}) {
+        const TBlobStorageGroupInfo info(erasure, 1, TBlobStorageGroupType(erasure).BlobSubgroupSize());
+        TState state(erasure);
+        const TLogoBlobID original(1, 1, 3, 0, 1000, 5);
+        TBlobStorageGroupInfo::TVDiskIds originalDisks;
+        info.PickSubgroup(original.Hash(), &originalDisks, nullptr);
+        for (ui32 i = 0; i < 16; ++i) {
+            const auto patched = state.AllocatePatchedLogoBlobId(1000, 0, original, i);
+            TBlobStorageGroupInfo::TVDiskIds patchedDisks;
+            info.PickSubgroup(patched.Hash(), &patchedDisks, nullptr);
+            UNIT_ASSERT(originalDisks == patchedDisks);
+        }
+    }
+}
+
 Y_UNIT_TEST(TestWriteReadPatchRead) {
     TTestContext tc;
     TFinalizer finalizer(tc);

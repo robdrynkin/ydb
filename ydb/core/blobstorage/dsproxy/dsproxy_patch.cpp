@@ -940,7 +940,13 @@ public:
         bool result = true;
         if (Info->Type.ErasureFamily() == TErasureType::ErasureParityBlock) {
             result = TEvBlobStorage::TEvPatch::GetBlobIdWithSamePlacement(OriginalId, &truePatchedBlobId,
-                    MaskForCookieBruteForcing, OriginalGroupId.GetRawId(), Info->GroupID.GetRawId());
+                    MaskForCookieBruteForcing, OriginalGroupId.GetRawId(), Info->GroupID.GetRawId(), Info->Type);
+            if (result && PatchedId != truePatchedBlobId
+                    && Info->Type.GetErasure() == TErasureType::Erasure8Plus2Block
+                    && TEvBlobStorage::TEvPatch::BlobPlacementKind(OriginalId)
+                        == TEvBlobStorage::TEvPatch::BlobPlacementKind(PatchedId)) {
+                result = false; // A legacy client matched modulo 8; use fallback.
+            }
             if (result && PatchedId != truePatchedBlobId) {
                 TStringBuilder str;
                 str << "PatchedId wasn't from TEvBlobStorage::TEvPatch::GetBlobIdWithSamePlacement;";
@@ -967,12 +973,19 @@ public:
         }
 
         IsGoodPatchedBlobId = result;
-        IsAllowedErasure = (Info->Type.ErasureFamily() == TErasureType::ErasureParityBlock
-                && Info->Type.GetErasure() != TErasureType::Erasure8Plus2Block)
+        if (EnableVPatchForTesting && IsGoodPatchedBlobId
+                && Info->Type.ErasureFamily() == TErasureType::ErasureParityBlock) {
+            TBlobStorageGroupInfo::TVDiskIds patchedVDisks;
+            Info->PickSubgroup(PatchedId.Hash(), &patchedVDisks, nullptr);
+            IsGoodPatchedBlobId = VDisks == patchedVDisks;
+        }
+        IsAllowedErasure = Info->Type.ErasureFamily() == TErasureType::ErasureParityBlock
                 || Info->Type.GetErasure() == TErasureType::ErasureNone
                 || Info->Type.GetErasure() == TErasureType::ErasureMirror3dc;
         if (EnableVPatchForTesting && IsGoodPatchedBlobId && IsAllowedErasure && UseVPatch
-                && OriginalGroupId == Info->GroupID && !IsSecured) {
+                && OriginalGroupId == Info->GroupID && !IsSecured
+                && OriginalId.CrcMode() == TErasureType::CrcModeNone
+                && PatchedId.CrcMode() == TErasureType::CrcModeNone) {
             YDB_LOG_PATCH_LOG(PRI_DEBUG, "Start VPatch strategy from bootstrap",
                 {"marker", "BPPA03"});
             StartVPatch();

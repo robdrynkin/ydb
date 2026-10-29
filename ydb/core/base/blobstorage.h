@@ -1731,20 +1731,24 @@ struct TEvBlobStorage {
             }
         }
 
-        static ui8 BlobPlacementKind(const TLogoBlobID &blob) {
-            return blob.Hash() % BaseDomainsCount;
+        static ui8 BlobPlacementKind(const TLogoBlobID &blob,
+                TBlobStorageGroupType type = TBlobStorageGroupType::Erasure4Plus2Block) {
+            const ui32 domainCount = type.GetErasure() == TBlobStorageGroupType::Erasure8Plus2Block
+                ? type.BlobSubgroupSize() : BaseDomainsCount;
+            return blob.Hash() % domainCount;
         }
 
         static bool GetBlobIdWithSamePlacement(const TLogoBlobID &originalId, TLogoBlobID *patchedId,
-                ui32 bitsForBruteForce, ui32 originalGroupId, ui32 currentGroupId)
+                ui32 bitsForBruteForce, ui32 originalGroupId, ui32 currentGroupId,
+                TBlobStorageGroupType type = TBlobStorageGroupType::Erasure4Plus2Block)
         {
             if (originalGroupId != currentGroupId) {
                 return false;
             }
 
-            ui32 expectedValue = originalId.Hash() % BaseDomainsCount;
+            ui32 expectedValue = BlobPlacementKind(originalId, type);
             Y_ABORT_UNLESS(patchedId);
-            if (patchedId->Hash() % BaseDomainsCount == expectedValue) {
+            if (BlobPlacementKind(*patchedId, type) == expectedValue) {
                 return true;
             }
 
@@ -1759,7 +1763,7 @@ struct TEvBlobStorage {
 
                 TLogoBlobID id(patchedId->TabletID(), patchedId->Generation(), patchedId->Step(), patchedId->Channel(),
                         patchedId->BlobSize(), cookie, 0, patchedId->CrcMode());
-                if (id.Hash() % BaseDomainsCount == expectedValue) {
+                if (BlobPlacementKind(id, type) == expectedValue) {
                     *patchedId = id;
                     return true;
                 }

@@ -920,6 +920,7 @@ TLogoBlobID TKeyValueState::AllocatePatchedLogoBlobId(ui32 size, ui32 storageCha
     ui32 generation = ExecutorGeneration;
     TLogoBlobID id;
     using TEvPatch = TEvBlobStorage::TEvPatch;
+    const auto type = TabletInfo->Channels[storageChannelIdx].Type;
     do {
         id = TLogoBlobID(TabletId, generation, NextLogoBlobStep, storageChannelIdx, size, NextLogoBlobCookie);
         if (NextLogoBlobCookie < TLogoBlobID::MaxCookie) {
@@ -927,7 +928,7 @@ TLogoBlobID TKeyValueState::AllocatePatchedLogoBlobId(ui32 size, ui32 storageCha
         } else {
             Step();
         }
-    } while (TEvPatch::BlobPlacementKind(id) != TEvPatch::BlobPlacementKind(originalBlobId));
+    } while (TEvPatch::BlobPlacementKind(id, type) != TEvPatch::BlobPlacementKind(originalBlobId, type));
     Y_ABORT_UNLESS(!CollectOperation || THelpers::GenerationStep(id) >
         THelpers::TGenerationStep(CollectOperation->Header.GetCollectGeneration(), CollectOperation->Header.GetCollectStep()));
     ++InFlightForStep[id.Step()];

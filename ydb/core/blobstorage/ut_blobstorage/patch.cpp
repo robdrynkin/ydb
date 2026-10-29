@@ -89,7 +89,7 @@ Y_UNIT_TEST_SUITE(BlobPatching) {
         TString patchedData1 = ApplyDiffs(data, diffs1);
         TLogoBlobID patchedBlobId1(1, 1, 1, 0, size, 0);
         TEvBlobStorage::TEvPatch::GetBlobIdWithSamePlacement(originalBlobId, &patchedBlobId1, 0,
-                test.Info->GroupID.GetRawId(), test.Info->GroupID.GetRawId());
+                test.Info->GroupID.GetRawId(), test.Info->GroupID.GetRawId(), type);
         SendPatch(test, originalBlobId, patchedBlobId1, 0, diffs1, NKikimrProto::OK);
         SendGet(test, patchedBlobId1, patchedData1, NKikimrProto::OK);
 
@@ -99,14 +99,14 @@ Y_UNIT_TEST_SUITE(BlobPatching) {
         TString patchedData2 = ApplyDiffs(data, diffs2);
         TLogoBlobID patchedBlobId2(1, 1, 2, 0, size, 0);
         TEvBlobStorage::TEvPatch::GetBlobIdWithSamePlacement(originalBlobId, &patchedBlobId2, 0,
-                test.Info->GroupID.GetRawId(), test.Info->GroupID.GetRawId());
+                test.Info->GroupID.GetRawId(), test.Info->GroupID.GetRawId(), type);
         SendPatch(test, originalBlobId, patchedBlobId2, 0, diffs2, NKikimrProto::OK);
         SendGet(test, patchedBlobId2, patchedData2, NKikimrProto::OK);
 
         TLogoBlobID patchedBlobId3(1, 1, 3, 0, size, 0);
         TLogoBlobID truePatchedBlobId3(1, 1, 3, 0, size, 0);
         TEvBlobStorage::TEvPatch::GetBlobIdWithSamePlacement(originalBlobId, &truePatchedBlobId3, TLogoBlobID::MaxCookie,
-                test.Info->GroupID.GetRawId(), test.Info->GroupID.GetRawId());
+                test.Info->GroupID.GetRawId(), test.Info->GroupID.GetRawId(), type);
         UNIT_ASSERT(patchedBlobId3 != truePatchedBlobId3);
         NKikimrProto::EReplyStatus statusWhenNotMatchingCookie =
             type.ErasureFamily() == TErasureType::ErasureParityBlock ? NKikimrProto::ERROR : NKikimrProto::OK;
