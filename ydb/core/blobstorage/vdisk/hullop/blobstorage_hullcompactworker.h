@@ -533,7 +533,8 @@ namespace NKikimr {
                     return nullptr;
 
                 default:
-                    Y_ABORT_S(HullCtx->VCtx->VDiskLogPrefix);
+                    Y_ABORT_S(HullCtx->VCtx->VDiskLogPrefix << " unexpected TEvRestoreCorruptedBlobResult status# "
+                        << NKikimrProto::EReplyStatus_Name(item.Status));
             }
         }
 
